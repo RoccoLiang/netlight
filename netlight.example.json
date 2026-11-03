@@ -1,0 +1,13 @@
+{
+  "org": "範例公司",
+  "contact": {
+    "default": "IT 服務台 分機 1234／Teams「IT Helpdesk」",
+    "isp": "網管組 分機 5678",
+    "vpn_broken": "VPN 問題請找資安組 分機 9012"
+  },
+  "targets": [
+    { "name": "公司 ERP", "url": "https://erp.example.com" }
+  ],
+  "replace_default_targets": false,
+  "show_public_ip": true
+}

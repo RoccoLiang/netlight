@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>網路紅綠燈</title>
+	<link rel="stylesheet" href="app.css">
+	<script src="app.js" defer></script>
+</head>
+<body>
+<main class="wrap" id="main">
+	<h1>網路紅綠燈</h1>
+	<p class="subtitle">檢查網路斷在哪一段、該找誰處理</p>
+
+	<p class="run-row">
+		<button type="button" id="run" class="primary">開始檢查</button>
+	</p>
+
+	<ul class="lights" aria-label="五盞燈檢查結果">
+		<li>
+			<span class="mark mark-pending" id="mark-0" aria-hidden="true">○</span>
+			<span class="light-body">
+				<span class="light-line"><span class="light-name">本機網路</span><span class="light-status" id="status-0">等待中</span></span>
+				<span class="light-summary" id="summary-0"></span>
+			</span>
+		</li>
+		<li>
+			<span class="mark mark-pending" id="mark-1" aria-hidden="true">○</span>
+			<span class="light-body">
+				<span class="light-line"><span class="light-name">路由器</span><span class="light-status" id="status-1">等待中</span></span>
+				<span class="light-summary" id="summary-1"></span>
+			</span>
+		</li>
+		<li>
+			<span class="mark mark-pending" id="mark-2" aria-hidden="true">○</span>
+			<span class="light-body">
+				<span class="light-line"><span class="light-name">對外連線</span><span class="light-status" id="status-2">等待中</span></span>
+				<span class="light-summary" id="summary-2"></span>
+			</span>
+		</li>
+		<li>
+			<span class="mark mark-pending" id="mark-3" aria-hidden="true">○</span>
+			<span class="light-body">
+				<span class="light-line"><span class="light-name">網址查詢</span><span class="light-status" id="status-3">等待中</span></span>
+				<span class="light-summary" id="summary-3"></span>
+			</span>
+		</li>
+		<li>
+			<span class="mark mark-pending" id="mark-4" aria-hidden="true">○</span>
+			<span class="light-body">
+				<span class="light-line"><span class="light-name">網站連線</span><span class="light-status" id="status-4">等待中</span></span>
+				<span class="light-summary" id="summary-4"></span>
+			</span>
+		</li>
+	</ul>
+
+	<section class="result" aria-live="polite">
+		<h2>結論</h2>
+		<p class="verdict-text" id="verdict-text">按下「開始檢查」開始檢查網路。</p>
+		<h2>建議</h2>
+		<p class="verdict-text" id="verdict-action">檢查完成後，這裡會告訴你下一步該怎麼做。</p>
+		<div id="contact-wrap" hidden>
+			<h2>聯絡</h2>
+			<p class="verdict-text" id="verdict-contact"></p>
+		</div>
+	</section>
+
+	<p class="buttons">
+		<button type="button" id="copy" disabled>複製回報給 IT</button>
+		<button type="button" id="bye">結束 netlight</button>
+		<span class="copy-note" id="copy-note" role="status"></span>
+	</p>
+
+	<details class="detail">
+		<summary>技術細節（給協助你的人看）</summary>
+		<dl id="evidence"></dl>
+	</details>
+</main>
+
+<div class="ended" id="ended" hidden>
+	<h1>網路紅綠燈</h1>
+	<p>netlight 已結束，可以關閉這個分頁。</p>
+</div>
+</body>
+</html>
