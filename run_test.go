@@ -126,7 +126,7 @@ func TestRunWithEventsStages(t *testing.T) {
 	if f.NoLink {
 		return
 	}
-	for _, s := range []string{stageDirect, stagePublicDNS, stageDNS, stageSites, stageCaptive} {
+	for _, s := range []string{stageDirect, stagePublicDNS, stageDNS, stageRoute, stageSites, stageCaptive} {
 		if counts[s] != 1 {
 			t.Errorf("%s 應出現一次，實際 %d 次（全部：%v）", s, counts[s], stages)
 		}

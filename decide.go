@@ -119,6 +119,21 @@ type CheckpointResult struct {
 	Ms      int64    `json:"ms"`
 }
 
+// Hop：路由追蹤的一站（沒有回應的站不列入）
+type Hop struct {
+	TTL     int    `json:"ttl"`
+	IP      string `json:"ip"`
+	Ms      int64  `json:"ms"`
+	Reached bool   `json:"reached,omitempty"` // 這一站就是目的地
+}
+
+// RouteResult：路由追蹤結果
+type RouteResult struct {
+	Target  string `json:"target"`
+	Hops    []Hop  `json:"hops,omitempty"`    // 依 TTL 由小到大
+	Unknown bool   `json:"unknown,omitempty"` // 這台電腦無法執行（系統不允許一般權限 ICMP）
+}
+
 type Facts struct {
 	Local       Local              `json:"local"`
 	NoLink      bool               `json:"no_link"`
@@ -131,6 +146,7 @@ type Facts struct {
 	Sites       []Site             `json:"sites"`
 	Captive     Captive            `json:"captive"`
 	Checkpoints []CheckpointResult `json:"checkpoints,omitempty"`
+	Route       RouteResult        `json:"route"`
 }
 
 // ---- 判斷結果 ----
@@ -576,6 +592,49 @@ func lightOrg(f Facts, prev Light, orgOK, internetOK bool) Light {
 	return l
 }
 
+// routeEvidence：路由追蹤的證據行（只作證據，不影響燈號與結論）
+func routeEvidence(f Facts, internetOK bool) []string {
+	if f.Route.Target == "" {
+		return nil // 探測沒有執行（例如測試或 NoLink）
+	}
+	if f.Route.Unknown {
+		return []string{"路由追蹤：這台電腦無法執行（系統不允許一般權限 ICMP）"}
+	}
+	if len(f.Route.Hops) == 0 {
+		return []string{"路由追蹤（往 " + f.Route.Target + "）：沒有任何節點回應"}
+	}
+	var items []string
+	prevTTL := 0
+	for _, h := range f.Route.Hops {
+		if prevTTL > 0 && h.TTL > prevTTL+1 {
+			items = append(items, "*") // 兩站之間有沒有回應的站
+		}
+		prevTTL = h.TTL
+		items = append(items, fmt.Sprintf("%d. %s%s", h.TTL, h.IP, hopLabel(f, h)))
+	}
+	ev := []string{"路由追蹤（往 " + f.Route.Target + "）：" + strings.Join(items, " → ")}
+	if last := f.Route.Hops[len(f.Route.Hops)-1]; !internetOK && !last.Reached {
+		ev = append(ev, fmt.Sprintf("最後回應的節點：第 %d 站 %s%s", last.TTL, last.IP, hopLabel(f, last)))
+	}
+	return ev
+}
+
+// hopLabel：一站的標註（路由器、單位網路檢查點、抵達）
+func hopLabel(f Facts, h Hop) string {
+	if h.IP == f.Local.Gateway {
+		return "（路由器）"
+	}
+	for _, c := range f.Checkpoints {
+		if c.Host == h.IP {
+			return "（" + c.Name + "）"
+		}
+	}
+	if h.Reached {
+		return "（抵達）"
+	}
+	return ""
+}
+
 func lightEgress(f Facts, prev Light, internetOK, anyDirect, anyReached, certAny, pubDNSOK, onlyCustom bool, row verdictRow) Light {
 	l := Light{Name: "對外連線", Evidence: probeEvidence(f.Direct)}
 	var notes []string
@@ -635,6 +694,7 @@ func lightEgress(f Facts, prev Light, internetOK, anyDirect, anyReached, certAny
 			}
 		}
 	}
+	l.Evidence = append(l.Evidence, routeEvidence(f, internetOK)...)
 	return l
 }
 

@@ -39,6 +39,7 @@ const (
 	stageGateway     = "gateway"
 	stageSites       = "sites"
 	stageCaptive     = "captive"
+	stageRoute       = "route"
 )
 
 // 撥號逾時：自建 Transport 的 DialContext 上限，避免撥號在背景無限等待
@@ -619,6 +620,7 @@ func runWithEvents(ctx context.Context, cfg Config, emit func(stage string)) Fac
 	if len(cfg.Checkpoints) > 0 {
 		cpRes = make([]CheckpointResult, len(cfg.Checkpoints))
 	}
+	var route RouteResult
 	// group：跑一組探測，組內全部完成時 emit
 	group := func(stage string, run func()) *sync.WaitGroup {
 		g := &sync.WaitGroup{}
@@ -652,6 +654,7 @@ func runWithEvents(ctx context.Context, cfg Config, emit func(stage string)) Fac
 		}
 		wg.Wait()
 	})
+	gRoute := group(stageRoute, func() { route = routeProbe(ctx) })
 	var gCheckpoints *sync.WaitGroup
 	if len(cfg.Checkpoints) > 0 {
 		gCheckpoints = group(stageCheckpoints, func() {
@@ -662,7 +665,7 @@ func runWithEvents(ctx context.Context, cfg Config, emit func(stage string)) Fac
 			wg.Wait()
 		})
 	}
-	earlys := []*sync.WaitGroup{gDirect, gPublicDNS, gDNS}
+	earlys := []*sync.WaitGroup{gDirect, gPublicDNS, gDNS, gRoute}
 	if gCheckpoints != nil {
 		earlys = append(earlys, gCheckpoints)
 	}
@@ -768,6 +771,7 @@ func runWithEvents(ctx context.Context, cfg Config, emit func(stage string)) Fac
 	}
 	f.Gateway = gateway
 	early.Wait() // 各組 emit 都在 group goroutine 內，early.Wait 保證 emit 在回傳前完成
+	f.Route = route
 	return f
 }
 

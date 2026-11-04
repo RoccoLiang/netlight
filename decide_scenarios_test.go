@@ -635,6 +635,38 @@ func TestDecideScenarios(t *testing.T) {
 			},
 		},
 		{
+			name: "路由追蹤只是輔助證據",
+			id:   "T16",
+			mod: func(f *Facts) {
+				f.Route = RouteResult{Target: "1.1.1.1", Hops: []Hop{
+					{TTL: 1, IP: "192.168.1.1", Ms: 2},
+					{TTL: 2, IP: "203.0.113.9", Ms: 5},
+					{TTL: 3, IP: "1.1.1.1", Ms: 8, Reached: true},
+				}}
+			},
+			code: OK,
+			check: func(t *testing.T, r Report) {
+				base := decide(healthy(), Config{})
+				if r.Verdict != base.Verdict {
+					t.Errorf("結論應與沒有 Route 時相同：%+v vs %+v", r.Verdict, base.Verdict)
+				}
+				if len(r.Lights) != len(base.Lights) || len(base.Lights) != 5 {
+					t.Fatalf("燈數 = %d，預期 5", len(r.Lights))
+				}
+				for i := range base.Lights {
+					if r.Lights[i].Name != base.Lights[i].Name || r.Lights[i].Status != base.Lights[i].Status || r.Lights[i].Summary != base.Lights[i].Summary {
+						t.Errorf("燈 %d（%s）與沒有 Route 時不同：%v（%s）vs %v（%s）", i+1,
+							r.Lights[i].Name, r.Lights[i].Status, r.Lights[i].Summary,
+							base.Lights[i].Status, base.Lights[i].Summary)
+					}
+				}
+				ev := strings.Join(r.Lights[2].Evidence, "\n")
+				if !strings.Contains(ev, "路由追蹤（往 1.1.1.1）") {
+					t.Errorf("對外連線證據應含路由追蹤：%q", ev)
+				}
+			},
+		},
+		{
 			name: "沒有設定檢查點",
 			id:   "T14",
 			mod:  func(f *Facts) {},

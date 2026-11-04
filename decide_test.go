@@ -377,3 +377,52 @@ func TestExitCode(t *testing.T) {
 		}
 	}
 }
+
+func TestRouteEvidence(t *testing.T) {
+	base := func(route RouteResult) Facts {
+		f := healthy()
+		f.Checkpoints = []CheckpointResult{{Name: "單位防火牆", Host: "10.1.0.1", Check: "tcp:443", OK: true}}
+		f.Route = route
+		return f
+	}
+	cases := []struct {
+		name       string
+		f          Facts
+		internetOK bool
+		want       []string
+	}{
+		{"探測沒有執行（Target 為空）", healthy(), true, nil},
+		{"系統不允許一般權限 ICMP", base(RouteResult{Target: "1.1.1.1", Unknown: true}), true,
+			[]string{"路由追蹤：這台電腦無法執行（系統不允許一般權限 ICMP）"}},
+		{"沒有任何節點回應", base(RouteResult{Target: "1.1.1.1"}), false,
+			[]string{"路由追蹤（往 1.1.1.1）：沒有任何節點回應"}},
+		{"正常抵達（路由器、檢查點標註與不連續 TTL）", base(RouteResult{Target: "1.1.1.1", Hops: []Hop{
+			{TTL: 1, IP: "192.168.1.1", Ms: 2},
+			{TTL: 3, IP: "10.1.0.1", Ms: 5},
+			{TTL: 4, IP: "203.0.113.9", Ms: 8},
+			{TTL: 5, IP: "1.1.1.1", Ms: 10, Reached: true},
+		}}), true, []string{
+			"路由追蹤（往 1.1.1.1）：1. 192.168.1.1（路由器） → * → 3. 10.1.0.1（單位防火牆） → 4. 203.0.113.9 → 5. 1.1.1.1（抵達）",
+		}},
+		{"不通時指出最後回應的節點", base(RouteResult{Target: "1.1.1.1", Hops: []Hop{
+			{TTL: 1, IP: "192.168.1.1", Ms: 2},
+			{TTL: 3, IP: "10.1.0.1", Ms: 5},
+		}}), false, []string{
+			"路由追蹤（往 1.1.1.1）：1. 192.168.1.1（路由器） → * → 3. 10.1.0.1（單位防火牆）",
+			"最後回應的節點：第 3 站 10.1.0.1（單位防火牆）",
+		}},
+		{"不通但已抵達目標時不指出最後節點", base(RouteResult{Target: "1.1.1.1", Hops: []Hop{
+			{TTL: 1, IP: "192.168.1.1", Ms: 2},
+			{TTL: 2, IP: "1.1.1.1", Ms: 6, Reached: true},
+		}}), false, []string{
+			"路由追蹤（往 1.1.1.1）：1. 192.168.1.1（路由器） → 2. 1.1.1.1（抵達）",
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := routeEvidence(c.f, c.internetOK); !slices.Equal(got, c.want) {
+				t.Errorf("routeEvidence = %q，預期 %q", got, c.want)
+			}
+		})
+	}
+}
