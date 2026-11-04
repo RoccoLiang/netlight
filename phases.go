@@ -89,7 +89,8 @@ func (r *phaseRecorder) trace() *httptrace.ClientTrace {
 		TLSHandshakeStart: func() {
 			r.mu.Lock()
 			if !r.frozen {
-				r.tlsStarted, r.tlsStart = true, time.Now()
+				// HTTPS 代理等情境會交握兩次：只有最後一次的結果有效
+				r.tlsStarted, r.tlsStart, r.tlsDone = true, time.Now(), false
 			}
 			r.mu.Unlock()
 		},
@@ -206,7 +207,7 @@ func phaseLine(s Site, mode ProxyMode) string {
 		if len(segs) == 0 {
 			return ""
 		}
-		return "    分段：" + strings.Join(segs, "、") + note
+		return "↳ 分段：" + strings.Join(segs, "、") + note
 	}
 	stage := map[string]string{
 		"dns":     "查網址（DNS）",
@@ -219,9 +220,9 @@ func phaseLine(s Site, mode ProxyMode) string {
 		if len(segs) == 0 {
 			return ""
 		}
-		return "    分段：" + strings.Join(segs, "、") + note
+		return "↳ 分段：" + strings.Join(segs, "、") + note
 	}
-	line := "    停在：" + stage
+	line := "↳ 停在：" + stage
 	if len(segs) > 0 {
 		line += "（已完成：" + strings.Join(segs, "、") + "）"
 	}

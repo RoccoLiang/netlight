@@ -467,9 +467,11 @@ func TestLightSitesPhases(t *testing.T) {
 			t.Errorf("證據行 %d 不應改變：%q vs %q", i+2, with.Evidence[i+2], ev)
 		}
 	}
-	// 沒有 Phases 時證據行數不變（沒有額外的分段行）
-	if len(without.Evidence) != len(lightSites(healthy(), Light{Status: Green}, true, nil, verdictRow{}).Evidence) {
-		t.Error("沒有 Phases 時證據行數不應改變")
+	// 沒有 Phases 時，證據中不應出現任何分段行
+	for _, ev := range without.Evidence {
+		if strings.HasPrefix(ev, "↳ ") {
+			t.Errorf("沒有 Phases 時不應有分段行：%q", ev)
+		}
 	}
 }
 

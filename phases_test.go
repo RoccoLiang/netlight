@@ -182,15 +182,57 @@ func TestPhaseRecorderConcurrentHooks(t *testing.T) {
 	}
 }
 
+// 兩次 TLS 交握：前一次成功、後一次失敗 → 以最後一次為準
+func TestPhaseRecorderTLSRedoneFail(t *testing.T) {
+	r := newPhaseRecorder()
+	tr := r.trace()
+	tr.ConnectStart("tcp", "192.0.2.1:443")
+	tr.ConnectDone("tcp", "192.0.2.1:443", nil)
+	tr.TLSHandshakeStart()
+	tr.TLSHandshakeDone(tls.ConnectionState{}, nil)
+	tr.TLSHandshakeStart()
+	tr.TLSHandshakeDone(tls.ConnectionState{}, errors.New("第二次交握失敗"))
+	p := r.snapshot()
+	if p.TLSMs != -1 {
+		t.Errorf("最後一次交握失敗時 TLSMs 應為 -1：%+v", p)
+	}
+	if p.Reached != "connect" {
+		t.Errorf("Reached = %q，預期 \"connect\"", p.Reached)
+	}
+	if p.Stalled != "tls" {
+		t.Errorf("Stalled = %q，預期 \"tls\"", p.Stalled)
+	}
+}
+
+// 兩次 TLS 交握都成功 → 以最後一次為準
+func TestPhaseRecorderTLSRedoneOK(t *testing.T) {
+	r := newPhaseRecorder()
+	tr := r.trace()
+	tr.ConnectStart("tcp", "192.0.2.1:443")
+	tr.ConnectDone("tcp", "192.0.2.1:443", nil)
+	tr.TLSHandshakeStart()
+	tr.TLSHandshakeDone(tls.ConnectionState{}, nil)
+	tr.TLSHandshakeStart()
+	tr.TLSHandshakeDone(tls.ConnectionState{}, nil)
+	p := r.snapshot()
+	if p.TLSMs < 0 {
+		t.Errorf("最後一次交握成功時 TLSMs 應非負：%+v", p)
+	}
+	if p.Reached != "tls" && p.Reached != "response" {
+		t.Errorf("Reached = %q，不應低於 \"tls\"", p.Reached)
+	}
+}
+
 // hook 序列與 snapshot() 並行；凍結之後結果不再改變（不斷言 Reached 的值）
 func TestPhaseRecorderConcurrentSnapshot(t *testing.T) {
 	r := newPhaseRecorder()
 	tr := r.trace()
 	var wg sync.WaitGroup
+	var p0 *SitePhases // 並行期間那次 snapshot 的結果（wg.Wait() 之後讀取）
 	wg.Add(1)
 	go func() { // 同時 snapshot：frozen 路徑也要在 race 下安全
 		defer wg.Done()
-		_ = r.snapshot()
+		p0 = r.snapshot()
 	}()
 	for i := range 8 {
 		wg.Add(1)
@@ -209,9 +251,8 @@ func TestPhaseRecorderConcurrentSnapshot(t *testing.T) {
 	}
 	wg.Wait()
 	p1 := r.snapshot()
-	p2 := r.snapshot()
-	if *p1 != *p2 {
-		t.Errorf("並行期間的 snapshot 之後結果不應改變：%+v vs %+v", p1, p2)
+	if *p0 != *p1 {
+		t.Errorf("並行期間的 snapshot 之後結果不應改變：%+v vs %+v", p0, p1)
 	}
 }
 
@@ -225,24 +266,24 @@ func TestPhaseLine(t *testing.T) {
 		{"nil", Site{Probe: Probe{OK: true}}, ProxyNone, ""},
 		{"成功四段", Site{Probe: Probe{OK: true},
 			Phases: &SitePhases{DNSMs: 3, ConnectMs: 5, TLSMs: 7, WaitMs: 9, Reached: "response"}},
-			ProxyNone, "    分段：DNS 3ms、TCP 5ms、TLS 7ms、等待回應 9ms"},
+			ProxyNone, "↳ 分段：DNS 3ms、TCP 5ms、TLS 7ms、等待回應 9ms"},
 		{"成功但 DNS 為 -1", Site{Probe: Probe{OK: true},
 			Phases: &SitePhases{DNSMs: -1, ConnectMs: 5, TLSMs: 7, WaitMs: 9, Reached: "response"}},
-			ProxyNone, "    分段：TCP 5ms、TLS 7ms、等待回應 9ms"},
+			ProxyNone, "↳ 分段：TCP 5ms、TLS 7ms、等待回應 9ms"},
 		{"失敗停在 TLS", Site{Probe: Probe{},
 			Phases: &SitePhases{DNSMs: 3, ConnectMs: 5, TLSMs: -1, WaitMs: -1, Reached: "connect", Stalled: "tls"}},
-			ProxyNone, "    停在：加密交握（TLS）（已完成：DNS 3ms、TCP 5ms）"},
+			ProxyNone, "↳ 停在：加密交握（TLS）（已完成：DNS 3ms、TCP 5ms）"},
 		{"失敗停在 DNS", Site{Probe: Probe{},
 			Phases: &SitePhases{DNSMs: -1, ConnectMs: -1, TLSMs: -1, WaitMs: -1, Stalled: "dns"}},
-			ProxyNone, "    停在：查網址（DNS）"},
+			ProxyNone, "↳ 停在：查網址（DNS）"},
 		{"IP 目標連線失敗", Site{Probe: Probe{},
 			Phases: &SitePhases{DNSMs: -1, ConnectMs: -1, TLSMs: -1, WaitMs: -1, Stalled: "connect"}},
-			ProxyNone, "    停在：建立連線（TCP）"},
+			ProxyNone, "↳ 停在：建立連線（TCP）"},
 		{"失敗但沒有停住的階段與已完成段", Site{Probe: Probe{},
 			Phases: &SitePhases{DNSMs: -1, ConnectMs: -1, TLSMs: -1, WaitMs: -1}}, ProxyNone, ""},
 		{"ProxyExplicit 且 Route 為空（推定經由代理）時加註", Site{Probe: Probe{OK: true},
 			Phases: &SitePhases{DNSMs: 3, ConnectMs: 5, TLSMs: 7, WaitMs: 9, Reached: "response"}},
-			ProxyExplicit, "    分段：DNS 3ms、TCP 5ms、TLS 7ms、等待回應 9ms；經由代理時 DNS 與 TCP 是連往代理伺服器"},
+			ProxyExplicit, "↳ 分段：DNS 3ms、TCP 5ms、TLS 7ms、等待回應 9ms；經由代理時 DNS 與 TCP 是連往代理伺服器"},
 		{"成功但全部 -1", Site{Probe: Probe{OK: true},
 			Phases: &SitePhases{DNSMs: -1, ConnectMs: -1, TLSMs: -1, WaitMs: -1, Reached: "response"}},
 			ProxyNone, ""},
