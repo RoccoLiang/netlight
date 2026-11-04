@@ -921,8 +921,8 @@ func TestDecideScenarios(t *testing.T) {
 				if strings.Contains(r.Verdict.Text, "本身異常") {
 					t.Errorf("結論不應說成網站本身異常：%q", r.Verdict.Text)
 				}
-				if r.Lights[3].Status != Yellow || !strings.Contains(r.Lights[3].Summary, "www.google.com") {
-					t.Errorf("網址查詢燈 = %v（%s），預期黃燈且摘要含主機名稱", r.Lights[3].Status, r.Lights[3].Summary)
+				if r.Lights[3].Status != Yellow || !strings.Contains(r.Lights[3].Summary, "部分網址在這台電腦查不到") || !strings.Contains(r.Lights[3].Summary, "www.google.com") {
+					t.Errorf("網址查詢燈 = %v（%s），預期黃燈且摘要含本機查詢說明與主機名稱", r.Lights[3].Status, r.Lights[3].Summary)
 				}
 			},
 		},
@@ -1014,6 +1014,7 @@ func TestDecideScenarios(t *testing.T) {
 		{
 			name: "部分單位節點沒有回應",
 			id:   "T20",
+			cfg:  Config{Org: "範例機關", Contact: map[string]string{"org_network": "資訊室 分機 100"}},
 			mod: func(f *Facts) {
 				f.Checkpoints = []CheckpointResult{
 					{Name: "單位防火牆", Host: "10.1.0.1", Check: "tcp:443", OK: true, Ms: 8},
@@ -1024,6 +1025,12 @@ func TestDecideScenarios(t *testing.T) {
 			check: func(t *testing.T, r Report) {
 				if r.Verdict.Text != "網路正常，但部分單位網路節點沒有回應。" {
 					t.Errorf("結論文字 = %q，預期 okOrgPartial 的說法", r.Verdict.Text)
+				}
+				if r.Verdict.Contact != "資訊室 分機 100" {
+					t.Errorf("窗口 = %q，預期資訊室 分機 100", r.Verdict.Contact)
+				}
+				if r.Verdict.Org != "範例機關" {
+					t.Errorf("單位 = %q，預期範例機關", r.Verdict.Org)
 				}
 			},
 		},
@@ -1043,6 +1050,116 @@ func TestDecideScenarios(t *testing.T) {
 				}
 				if r.Verdict.Contact != "" {
 					t.Errorf("單位節點正常時不應顯示窗口：%q", r.Verdict.Contact)
+				}
+			},
+		},
+		{
+			name: "經由代理的網站回 503、本機 DNS 逾時",
+			id:   "T20",
+			mod: func(f *Facts) {
+				f.Local.Proxy = Proxy{Mode: ProxyExplicit, Addr: "10.0.0.8:3128"}
+				f.DNS[0] = Probe{Target: "www.google.com", Err: ErrTimeout}
+				f.Sites[0] = Site{Name: "Google", Probe: Probe{Target: f.Sites[0].Target, OK: true}, Status: 503, Route: "proxy"}
+			},
+			code: SiteCode,
+			check: func(t *testing.T, r Report) {
+				if !strings.Contains(r.Verdict.Text, "本身異常") || strings.Contains(r.Verdict.Text, "查不到") {
+					t.Errorf("已有回應的網站應維持本身異常的說法：%q", r.Verdict.Text)
+				}
+			},
+		},
+		{
+			name: "經由代理的網站逾時、本機 DNS 失敗",
+			id:   "T20",
+			mod: func(f *Facts) {
+				f.Local.Proxy = Proxy{Mode: ProxyExplicit, Addr: "10.0.0.8:3128"}
+				f.DNS[0] = Probe{Target: "www.google.com", Err: ErrDNS}
+				f.Sites[0] = Site{Name: "Google", Probe: Probe{Target: f.Sites[0].Target, Err: ErrTimeout}, Route: "proxy"}
+			},
+			code: SiteCode,
+			check: func(t *testing.T, r Report) {
+				if strings.Contains(r.Verdict.Text, "查不到") {
+					t.Errorf("經由代理的網站不應歸因為查不到網址：%q", r.Verdict.Text)
+				}
+			},
+		},
+		{
+			name: "兩個網站共用同一主機、該主機 DNS 失敗",
+			id:   "T20",
+			mod: func(f *Facts) {
+				f.DNS = []Probe{
+					{Target: "www.google.com", Err: ErrDNS},
+					{Target: "www.cloudflare.com", OK: true},
+					{Target: "www.microsoft.com", OK: true},
+					{Target: "www.gov.tw", OK: true},
+				}
+				f.Sites[0] = Site{Name: "Google", Probe: Probe{Target: "https://www.google.com/", Err: ErrDNS}}
+				f.Sites = append(f.Sites[:1:1],
+					Site{Name: "Google 首頁", Probe: Probe{Target: "https://www.google.com/", Err: ErrDNS}},
+					f.Sites[1], f.Sites[2], f.Sites[3],
+				)
+			},
+			code: SiteCode,
+			check: func(t *testing.T, r Report) {
+				if !strings.Contains(r.Verdict.Text, "查不到") || !strings.Contains(r.Verdict.Text, "Google") || !strings.Contains(r.Verdict.Text, "Google 首頁") {
+					t.Errorf("結論應套用查不到網址並列出兩個名稱：%q", r.Verdict.Text)
+				}
+			},
+		},
+		{
+			name: "不健康網站的主機沒有對應 DNS 查詢",
+			id:   "T20",
+			mod: func(f *Facts) {
+				f.DNS = []Probe{
+					{Target: "www.cloudflare.com", OK: true},
+					{Target: "www.microsoft.com", OK: true},
+					{Target: "www.gov.tw", OK: true},
+				}
+				f.Sites[0].Probe = Probe{Target: f.Sites[0].Target, Err: ErrTimeout}
+			},
+			code: SiteCode,
+			check: func(t *testing.T, r Report) {
+				if strings.Contains(r.Verdict.Text, "查不到") {
+					t.Errorf("沒有對應 DNS 查詢時不應套用查不到網址：%q", r.Verdict.Text)
+				}
+			},
+		},
+		{
+			name: "單位節點都沒有回應、窗口 fallback 到 default",
+			id:   "T20",
+			cfg:  Config{Org: "範例機關", Contact: map[string]string{"default": "IT 服務台"}},
+			mod: func(f *Facts) {
+				f.Checkpoints = []CheckpointResult{
+					{Name: "單位防火牆", Host: "10.1.0.1", Check: "tcp:443", Err: ErrTimeout},
+					{Name: "GSN DNS", Host: "210.69.1.1", Check: "dns", Err: ErrTimeout},
+				}
+			},
+			code: OK,
+			check: func(t *testing.T, r Report) {
+				if r.Verdict.Text != "可以連到網際網路，但單位網路的節點都沒有回應。" {
+					t.Errorf("結論文字 = %q，預期 okOrgDown 的說法", r.Verdict.Text)
+				}
+				if r.Verdict.Contact != "IT 服務台" {
+					t.Errorf("窗口 = %q，預期 fallback 到 default「IT 服務台」", r.Verdict.Contact)
+				}
+			},
+		},
+		{
+			name: "部分單位節點沒有回應、沒有設定窗口",
+			id:   "T20",
+			mod: func(f *Facts) {
+				f.Checkpoints = []CheckpointResult{
+					{Name: "單位防火牆", Host: "10.1.0.1", Check: "tcp:443", OK: true, Ms: 8},
+					{Name: "GSN DNS", Host: "210.69.1.1", Check: "dns", Err: ErrTimeout},
+				}
+			},
+			code: OK,
+			check: func(t *testing.T, r Report) {
+				if r.Verdict.Text != "網路正常，但部分單位網路節點沒有回應。" {
+					t.Errorf("結論文字 = %q，預期 okOrgPartial 的說法", r.Verdict.Text)
+				}
+				if r.Verdict.Contact != "" {
+					t.Errorf("沒有設定窗口時不應顯示：%q", r.Verdict.Contact)
 				}
 			},
 		},

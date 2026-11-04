@@ -343,11 +343,19 @@ func siteRouteOf(s Site, mode ProxyMode) string {
 
 // siteDNSBlamed：每個不健康網站的主機，其系統 DNS 查詢都是失敗（且不是網址不存在）。
 // 一律以主機的系統 DNS 查詢結果為準（逾時會歸類為 ErrTimeout），不以網站本身的錯誤類別判斷；
-// 找不到對應查詢的網站視為不符合。
+// 已收到 HTTP 回應（例如 5xx）或經由代理的網站不算（後者由代理查網址）；找不到對應查詢的網站視為不符合。
 func siteDNSBlamed(f Facts, badSites []string) bool {
 	for _, s := range f.Sites {
 		if !slices.Contains(badSites, s.Name) || healthySite(s) {
 			continue
+		}
+		// 已收到 HTTP 回應代表連得上，不能說查不到網址
+		if s.OK {
+			return false
+		}
+		// 經由代理時由代理查網址，不能以本機 DNS 推斷
+		if siteRouteOf(s, f.Local.Proxy.Mode) == "proxy" {
+			return false
 		}
 		host := ""
 		if u, err := url.Parse(s.Target); err == nil {
@@ -356,7 +364,7 @@ func siteDNSBlamed(f Facts, badSites []string) bool {
 		if host == "" {
 			return false
 		}
-		// 找該主機的系統 DNS 查詢；全部都失敗（且不是網址不存在）才成立
+		// 找該主機的系統 DNS 查詢；查詢失敗（且不是網址不存在）才成立
 		i := slices.IndexFunc(f.DNS, func(p Probe) bool { return p.Target == host })
 		if i < 0 {
 			return false
@@ -798,7 +806,7 @@ func lightDNS(f Facts, prev Light, dnsFail, dnsOK, viaProxy bool) Light {
 		}
 		if len(partial) > 0 {
 			l.Status = Yellow
-			l.Summary = fmt.Sprintf("部分網址查不到：「%s」", strings.Join(partial, "、"))
+			l.Summary = fmt.Sprintf("部分網址在這台電腦查不到：「%s」", strings.Join(partial, "、"))
 			break
 		}
 		l.Status = Green
