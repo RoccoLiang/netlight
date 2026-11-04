@@ -1189,6 +1189,9 @@ func TestDecideScenarios(t *testing.T) {
 				if r.Verdict.Contact != "" {
 					t.Errorf("參考節點失敗不應顯示窗口：%q", r.Verdict.Contact)
 				}
+				if r.Lights[2].Name != "單位網路" || r.Lights[2].Status != Yellow {
+					t.Errorf("單位網路燈 = %s（%v），預期黃燈", r.Lights[2].Name, r.Lights[2].Status)
+				}
 				if !strings.Contains(r.Lights[2].Summary, "（參考）") {
 					t.Errorf("單位網路摘要應含「（參考）」：%q", r.Lights[2].Summary)
 				}
@@ -1212,6 +1215,9 @@ func TestDecideScenarios(t *testing.T) {
 				if r.Verdict.Contact != "單位資訊室 分機 2211" {
 					t.Errorf("窗口 = %q，預期單位資訊室 分機 2211", r.Verdict.Contact)
 				}
+				if r.Lights[2].Name != "單位網路" || r.Lights[2].Status != Yellow {
+					t.Errorf("單位網路燈 = %s（%v），預期黃燈", r.Lights[2].Name, r.Lights[2].Status)
+				}
 			},
 		},
 		{
@@ -1228,6 +1234,9 @@ func TestDecideScenarios(t *testing.T) {
 			check: func(t *testing.T, r Report) {
 				if r.Verdict.Text != "可以連到網際網路，但單位網路的節點都沒有回應。" {
 					t.Errorf("結論文字 = %q，預期 okOrgDown 的說法", r.Verdict.Text)
+				}
+				if r.Lights[2].Name != "單位網路" || r.Lights[2].Status != Yellow {
+					t.Errorf("單位網路燈 = %s（%v），預期黃燈", r.Lights[2].Name, r.Lights[2].Status)
 				}
 			},
 		},
@@ -1249,6 +1258,9 @@ func TestDecideScenarios(t *testing.T) {
 				if r.Verdict.Contact != "" {
 					t.Errorf("只有參考節點失敗不應顯示窗口：%q", r.Verdict.Contact)
 				}
+				if r.Lights[2].Name != "單位網路" || r.Lights[2].Status != Yellow {
+					t.Errorf("單位網路燈 = %s（%v），預期黃燈", r.Lights[2].Name, r.Lights[2].Status)
+				}
 			},
 		},
 		{
@@ -1266,6 +1278,11 @@ func TestDecideScenarios(t *testing.T) {
 				f.Sites = failSites(f.Sites, ErrTimeout)
 			},
 			code: OrgNetwork,
+			check: func(t *testing.T, r Report) {
+				if r.Lights[2].Name != "單位網路" || r.Lights[2].Status != Red {
+					t.Errorf("單位網路燈 = %s（%v），預期紅燈", r.Lights[2].Name, r.Lights[2].Status)
+				}
+			},
 		},
 		{
 			name: "必要節點沒有回應、只有參考節點有回應、連不出去",
@@ -1285,6 +1302,47 @@ func TestDecideScenarios(t *testing.T) {
 			check: func(t *testing.T, r Report) {
 				if r.Verdict.Text != "單位網路有節點回應，但從單位往外的線路不通。" {
 					t.Errorf("結論文字 = %q，預期 ispOrg 的說法", r.Verdict.Text)
+				}
+				if r.Lights[2].Name != "單位網路" || r.Lights[2].Status != Yellow {
+					t.Errorf("單位網路燈 = %s（%v），預期黃燈", r.Lights[2].Name, r.Lights[2].Status)
+				}
+			},
+		},
+		{
+			name: "必要節點無法執行、參考節點失敗、可上網",
+			id:   "T23",
+			cfg:  Config{Org: "範例機關", Contact: map[string]string{"org_network": "單位資訊室 分機 2211"}},
+			mod: func(f *Facts) {
+				f.Checkpoints = []CheckpointResult{
+					{Name: "內網主機", Host: "10.1.0.4", Check: "ping", Unknown: true},
+					{Name: "內部入口網", Host: "10.1.0.2", Check: "tcp:443", Reference: true, Err: ErrTimeout},
+				}
+			},
+			code: OK,
+			check: func(t *testing.T, r Report) {
+				if r.Verdict.Text != "網路正常。" {
+					t.Errorf("結論文字 = %q，預期一般「網路正常。」", r.Verdict.Text)
+				}
+				if r.Verdict.Contact != "" {
+					t.Errorf("必要節點 Unknown 且參考節點失敗不應顯示窗口：%q", r.Verdict.Contact)
+				}
+			},
+		},
+		{
+			name: "必要節點一個成功一個無法執行、參考節點失敗",
+			id:   "T23",
+			cfg:  Config{Org: "範例機關", Contact: map[string]string{"org_network": "單位資訊室 分機 2211"}},
+			mod: func(f *Facts) {
+				f.Checkpoints = []CheckpointResult{
+					{Name: "單位防火牆", Host: "10.1.0.1", Check: "tcp:443", OK: true, Ms: 8},
+					{Name: "內網主機", Host: "10.1.0.4", Check: "ping", Unknown: true},
+					{Name: "內部入口網", Host: "10.1.0.2", Check: "tcp:443", Reference: true, Err: ErrTimeout},
+				}
+			},
+			code: OK,
+			check: func(t *testing.T, r Report) {
+				if r.Verdict.Text != "網路正常。" {
+					t.Errorf("結論文字 = %q，預期一般「網路正常。」", r.Verdict.Text)
 				}
 			},
 		},

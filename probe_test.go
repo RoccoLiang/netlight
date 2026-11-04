@@ -587,3 +587,33 @@ func TestCheckpointProbeDNS(t *testing.T) {
 		t.Errorf("沒有伺服器不應 OK：%+v", r)
 	}
 }
+
+// TestCheckpointProbeReference：探測結果要帶出檢查點的必要／參考角色
+func TestCheckpointProbeReference(t *testing.T) {
+	ctx := context.Background()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	check := fmt.Sprintf("tcp:%d", ln.Addr().(*net.TCPAddr).Port)
+	no, yes := false, true
+	cases := []struct {
+		name    string
+		cp      Checkpoint
+		wantRef bool
+	}{
+		{"省略 required", Checkpoint{Name: "單位防火牆", Host: "127.0.0.1", Check: check}, false},
+		{"required true", Checkpoint{Name: "單位防火牆", Host: "127.0.0.1", Check: check, Required: &yes}, false},
+		{"required false", Checkpoint{Name: "內部入口網", Host: "127.0.0.1", Check: check, Required: &no}, true},
+	}
+	for _, c := range cases {
+		r := checkpointProbe(ctx, c.cp)
+		if !r.OK {
+			t.Errorf("%s：本機開著的埠應 OK：%+v", c.name, r)
+		}
+		if r.Reference != c.wantRef {
+			t.Errorf("%s：Reference = %v，預期 %v", c.name, r.Reference, c.wantRef)
+		}
+	}
+}
