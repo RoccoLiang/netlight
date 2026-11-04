@@ -78,6 +78,9 @@ func runMain(detail, asJSON, plain bool, cfgPath string) int {
 	}
 
 	emoji, color := setupConsole()
+	if useMapMode(stdoutIsTerminal(), color, emoji, plain, asJSON) {
+		return runMap(cfg, detail)
+	}
 	progress := stdoutIsTerminal() && !asJSON // stdout 是終端機時顯示進度提示
 	const progressMsg = "檢查中，最多約 10 秒…"
 	if progress {

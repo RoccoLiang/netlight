@@ -43,13 +43,18 @@ func render(w io.Writer, r Report, osName string, now time.Time, m renderMode) {
 			}
 		}
 	}
-	fmt.Fprintf(w, "結論：%s\n", r.Verdict.Text)
-	fmt.Fprintf(w, "建議：%s\n", r.Verdict.Action)
-	if r.Verdict.Contact != "" {
-		if r.Verdict.Org != "" {
-			fmt.Fprintf(w, "聯絡（%s）：%s\n", r.Verdict.Org, r.Verdict.Contact)
+	renderVerdict(w, r.Verdict)
+}
+
+// renderVerdict：輸出結論、建議、聯絡
+func renderVerdict(w io.Writer, v Verdict) {
+	fmt.Fprintf(w, "結論：%s\n", v.Text)
+	fmt.Fprintf(w, "建議：%s\n", v.Action)
+	if v.Contact != "" {
+		if v.Org != "" {
+			fmt.Fprintf(w, "聯絡（%s）：%s\n", v.Org, v.Contact)
 		} else {
-			fmt.Fprintf(w, "聯絡：%s\n", r.Verdict.Contact)
+			fmt.Fprintf(w, "聯絡：%s\n", v.Contact)
 		}
 	}
 }

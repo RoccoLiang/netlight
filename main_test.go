@@ -52,3 +52,22 @@ func TestAutoWeb(t *testing.T) {
 		}
 	}
 }
+
+// TestUseMapMode：只有互動式終端機＋顏色＋emoji＋非 plain＋非 JSON 才用路線圖
+func TestUseMapMode(t *testing.T) {
+	cases := []struct {
+		isTTY, color, emoji, plain, asJSON, want bool
+	}{
+		{true, true, true, false, false, true},
+		{false, true, true, false, false, false},
+		{true, false, true, false, false, false},
+		{true, true, false, false, false, false},
+		{true, true, true, true, false, false},
+		{true, true, true, false, true, false},
+	}
+	for _, c := range cases {
+		if got := useMapMode(c.isTTY, c.color, c.emoji, c.plain, c.asJSON); got != c.want {
+			t.Errorf("useMapMode(%v, %v, %v, %v, %v) = %v，預期 %v", c.isTTY, c.color, c.emoji, c.plain, c.asJSON, got, c.want)
+		}
+	}
+}
