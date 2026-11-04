@@ -1087,22 +1087,30 @@ func TestDecideScenarios(t *testing.T) {
 			name: "兩個網站共用同一主機、該主機 DNS 失敗",
 			id:   "T20",
 			mod: func(f *Facts) {
-				f.DNS = []Probe{
-					{Target: "www.google.com", Err: ErrDNS},
-					{Target: "www.cloudflare.com", OK: true},
-					{Target: "www.microsoft.com", OK: true},
-					{Target: "www.gov.tw", OK: true},
-				}
-				f.Sites[0] = Site{Name: "Google", Probe: Probe{Target: "https://www.google.com/", Err: ErrDNS}}
-				f.Sites = append(f.Sites[:1:1],
-					Site{Name: "Google 首頁", Probe: Probe{Target: "https://www.google.com/", Err: ErrDNS}},
-					f.Sites[1], f.Sites[2], f.Sites[3],
+				f.DNS = append(f.DNS, Probe{Target: "erp.example.com", Err: ErrDNS})
+				f.Sites = append(f.Sites,
+					Site{Name: "公文系統", Probe: Probe{Target: "https://erp.example.com/a", Err: ErrDNS}},
+					Site{Name: "差勤系統", Probe: Probe{Target: "https://erp.example.com/b", Err: ErrDNS}},
 				)
 			},
 			code: SiteCode,
 			check: func(t *testing.T, r Report) {
-				if !strings.Contains(r.Verdict.Text, "查不到") || !strings.Contains(r.Verdict.Text, "Google") || !strings.Contains(r.Verdict.Text, "Google 首頁") {
-					t.Errorf("結論應套用查不到網址並列出兩個名稱：%q", r.Verdict.Text)
+				if !strings.Contains(r.Verdict.Text, "「公文系統、差勤系統」") {
+					t.Errorf("結論應套用查不到網址並依序列出兩個名稱：%q", r.Verdict.Text)
+				}
+			},
+		},
+		{
+			name: "直連網站回 503、本機 DNS 逾時",
+			id:   "T20",
+			mod: func(f *Facts) {
+				f.DNS[0] = Probe{Target: "www.google.com", Err: ErrTimeout}
+				f.Sites[0] = Site{Name: "Google", Probe: Probe{Target: f.Sites[0].Target, OK: true}, Status: 503}
+			},
+			code: SiteCode,
+			check: func(t *testing.T, r Report) {
+				if !strings.Contains(r.Verdict.Text, "本身異常") || strings.Contains(r.Verdict.Text, "查不到") {
+					t.Errorf("直連且已有回應的網站應維持本身異常的說法：%q", r.Verdict.Text)
 				}
 			},
 		},
