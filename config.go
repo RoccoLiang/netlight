@@ -22,10 +22,14 @@ type Target struct {
 }
 
 type Checkpoint struct {
-	Name  string `json:"name"`
-	Host  string `json:"host"`
-	Check string `json:"check"` // "ping"、"dns"、"tcp:<port>"
+	Name     string `json:"name"`
+	Host     string `json:"host"`
+	Check    string `json:"check"`    // "ping"、"dns"、"tcp:<port>"
+	Required *bool  `json:"required"` // 省略時視為必要節點
 }
+
+// required：此檢查點是否為必要節點（未標註時預設 true）
+func (c Checkpoint) required() bool { return c.Required == nil || *c.Required }
 
 // Config：放在執行檔旁的 netlight.json，用來改成公司窗口與加入內部網站
 type Config struct {

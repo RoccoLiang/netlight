@@ -221,3 +221,53 @@ func TestLoadConfigCheckpoints(t *testing.T) {
 		t.Errorf("org_network 應可作為 contact key：%v", err)
 	}
 }
+
+func TestLoadConfigCheckpointRequired(t *testing.T) {
+	dir := t.TempDir()
+	write := func(content string) string {
+		p := filepath.Join(dir, "netlight.json")
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	// required: false → 參考節點
+	cfg, err := loadConfig(write(`{"checkpoints": [
+		{"name": "內部入口網", "host": "10.1.0.2", "check": "tcp:443", "required": false}
+	]}`))
+	if err != nil {
+		t.Fatalf("required: false 應可載入：%v", err)
+	}
+	if len(cfg.Checkpoints) != 1 || cfg.Checkpoints[0].required() {
+		t.Errorf("required: false 應為參考節點：%+v", cfg.Checkpoints)
+	}
+
+	// 省略 required → 必要節點
+	cfg, err = loadConfig(write(`{"checkpoints": [
+		{"name": "單位防火牆", "host": "10.1.0.1", "check": "tcp:443"}
+	]}`))
+	if err != nil {
+		t.Fatalf("省略 required 應可載入：%v", err)
+	}
+	if len(cfg.Checkpoints) != 1 || !cfg.Checkpoints[0].required() {
+		t.Errorf("省略 required 應為必要節點：%+v", cfg.Checkpoints)
+	}
+
+	// required: true → 必要節點
+	cfg, err = loadConfig(write(`{"checkpoints": [
+		{"name": "單位防火牆", "host": "10.1.0.1", "check": "tcp:443", "required": true}
+	]}`))
+	if err != nil {
+		t.Fatalf("required: true 應可載入：%v", err)
+	}
+	if len(cfg.Checkpoints) != 1 || !cfg.Checkpoints[0].required() {
+		t.Errorf("required: true 應為必要節點：%+v", cfg.Checkpoints)
+	}
+
+	// required 不是布林值 → 設定檔錯誤
+	if _, err := loadConfig(write(`{"checkpoints": [
+		{"name": "x", "host": "10.1.0.1", "check": "ping", "required": "no"}
+	]}`)); err == nil {
+		t.Error("required 為字串應回報錯誤")
+	}
+}

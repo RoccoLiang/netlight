@@ -461,7 +461,7 @@ func gatewayProbe(ctx context.Context, gw string) GatewayResult {
 func checkpointProbe(ctx context.Context, cp Checkpoint) CheckpointResult {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	r := CheckpointResult{Name: cp.Name, Host: cp.Host, Check: cp.Check}
+	r := CheckpointResult{Name: cp.Name, Host: cp.Host, Check: cp.Check, Reference: !cp.required()}
 	start := time.Now()
 	switch {
 	case cp.Check == "ping":

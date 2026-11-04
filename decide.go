@@ -113,13 +113,14 @@ type TraceResult struct {
 
 // CheckpointResult：設定檔檢查點的探測結果
 type CheckpointResult struct {
-	Name    string   `json:"name"`
-	Host    string   `json:"host"`
-	Check   string   `json:"check"`
-	OK      bool     `json:"ok"`
-	Unknown bool     `json:"unknown,omitempty"` // 這台電腦無法執行此檢查（例如系統不允許一般權限 ping）
-	Err     ErrClass `json:"error,omitempty"`
-	Ms      int64    `json:"ms"`
+	Name      string   `json:"name"`
+	Host      string   `json:"host"`
+	Check     string   `json:"check"`
+	OK        bool     `json:"ok"`
+	Unknown   bool     `json:"unknown,omitempty"`   // 這台電腦無法執行此檢查（例如系統不允許一般權限 ping）
+	Reference bool     `json:"reference,omitempty"` // 參考節點（required: false），沒有回應時不影響結論
+	Err       ErrClass `json:"error,omitempty"`
+	Ms        int64    `json:"ms"`
 }
 
 // Hop：路由追蹤的一站（沒有回應的站不列入）
@@ -447,6 +448,9 @@ func decide(f Facts, cfg Config) Report {
 	orgConfigured := len(f.Checkpoints) > 0 && slices.ContainsFunc(f.Checkpoints, func(c CheckpointResult) bool { return !c.Unknown })
 	orgAny := slices.ContainsFunc(f.Checkpoints, func(c CheckpointResult) bool { return c.OK })
 	orgOK := orgConfigured && !slices.ContainsFunc(f.Checkpoints, func(c CheckpointResult) bool { return !c.Unknown && !c.OK })
+	// 必要節點（required: false 以外的檢查點）的彙整：參考節點沒有回應不影響結論
+	reqConfigured := slices.ContainsFunc(f.Checkpoints, func(c CheckpointResult) bool { return !c.Reference && !c.Unknown })
+	reqAnyFailed := slices.ContainsFunc(f.Checkpoints, func(c CheckpointResult) bool { return !c.Reference && !c.Unknown && !c.OK })
 
 	// ---- 結論（由上往下，第一個符合者勝出）----
 	var key Code
@@ -508,9 +512,9 @@ func decide(f Facts, cfg Config) Report {
 		key = noGateway
 	case key == OK && cfg.ReplaceDefaultTargets && !anyDirect && !pubDNSOK:
 		key = okCustomOnly
-	case key == OK && orgConfigured && !orgAny:
+	case key == OK && reqConfigured && orgConfigured && !orgAny:
 		key = okOrgDown
-	case key == OK && orgConfigured && orgAny && !orgOK:
+	case key == OK && reqConfigured && reqAnyFailed:
 		key = okOrgPartial
 	}
 
@@ -641,17 +645,21 @@ func lightOrg(f Facts, prev Light, orgOK, internetOK bool) Light {
 	var names []string
 	ok, n := 0, 0
 	for _, c := range f.Checkpoints {
+		ref := ""
+		if c.Reference {
+			ref = "（參考）"
+		}
 		if c.Unknown {
-			l.Evidence = append(l.Evidence, c.Name+"（"+c.Host+"，"+c.Check+"）：無法在這台電腦執行")
+			l.Evidence = append(l.Evidence, c.Name+ref+"（"+c.Host+"，"+c.Check+"）：無法在這台電腦執行")
 			continue
 		}
 		n++
 		if c.OK {
 			ok++
-			l.Evidence = append(l.Evidence, fmt.Sprintf("%s（%s，%s）：成功 %dms", c.Name, c.Host, c.Check, c.Ms))
+			l.Evidence = append(l.Evidence, fmt.Sprintf("%s%s（%s，%s）：成功 %dms", c.Name, ref, c.Host, c.Check, c.Ms))
 		} else {
-			names = append(names, c.Name)
-			l.Evidence = append(l.Evidence, c.Name+"（"+c.Host+"，"+c.Check+"）："+errText[c.Err])
+			names = append(names, c.Name+ref)
+			l.Evidence = append(l.Evidence, c.Name+ref+"（"+c.Host+"，"+c.Check+"）："+errText[c.Err])
 		}
 	}
 	switch {

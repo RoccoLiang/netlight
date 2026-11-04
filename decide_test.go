@@ -512,3 +512,36 @@ func TestSiteRouteJSON(t *testing.T) {
 		t.Errorf("空值時 JSON 不應含 route 欄位：%s", b)
 	}
 }
+
+func TestLightOrgReference(t *testing.T) {
+	f := healthy()
+	f.Checkpoints = []CheckpointResult{
+		{Name: "單位防火牆", Host: "10.1.0.1", Check: "tcp:443", OK: true, Ms: 8},
+		{Name: "內部入口網", Host: "10.1.0.2", Check: "tcp:443", Reference: true, Err: ErrTimeout},
+	}
+	l := lightOrg(f, Light{Status: Green}, false, true)
+	if !strings.Contains(l.Summary, "「內部入口網（參考）」沒有回應") {
+		t.Errorf("摘要應為參考節點名稱加註「（參考）」：%q", l.Summary)
+	}
+	ev := strings.Join(l.Evidence, "\n")
+	if !strings.Contains(ev, "內部入口網（參考）（10.1.0.2，tcp:443）：逾時") {
+		t.Errorf("失敗參考節點的證據行應加註「（參考）」：%q", ev)
+	}
+	if !strings.Contains(ev, "單位防火牆（10.1.0.1，tcp:443）：成功 8ms") {
+		t.Errorf("必要節點的證據行不應加註：%q", ev)
+	}
+
+	// 成功與無法執行的參考節點也要加註
+	f.Checkpoints = []CheckpointResult{
+		{Name: "內部入口網", Host: "10.1.0.2", Check: "tcp:443", Reference: true, OK: true, Ms: 5},
+		{Name: "內網主機", Host: "10.1.0.4", Check: "ping", Reference: true, Unknown: true},
+	}
+	l = lightOrg(f, Light{Status: Green}, true, true)
+	ev = strings.Join(l.Evidence, "\n")
+	if !strings.Contains(ev, "內部入口網（參考）（10.1.0.2，tcp:443）：成功 5ms") {
+		t.Errorf("成功參考節點的證據行應加註「（參考）」：%q", ev)
+	}
+	if !strings.Contains(ev, "內網主機（參考）（10.1.0.4，ping）：無法在這台電腦執行") {
+		t.Errorf("無法執行的參考節點證據行應加註「（參考）」：%q", ev)
+	}
+}

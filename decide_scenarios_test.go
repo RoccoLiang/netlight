@@ -1171,6 +1171,123 @@ func TestDecideScenarios(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "只有參考節點沒有回應、必要節點正常",
+			id:   "T23",
+			cfg:  Config{Org: "範例機關", Contact: map[string]string{"org_network": "單位資訊室 分機 2211"}},
+			mod: func(f *Facts) {
+				f.Checkpoints = []CheckpointResult{
+					{Name: "單位防火牆", Host: "10.1.0.1", Check: "tcp:443", OK: true, Ms: 8},
+					{Name: "內部入口網", Host: "10.1.0.2", Check: "tcp:443", Reference: true, Err: ErrTimeout},
+				}
+			},
+			code: OK,
+			check: func(t *testing.T, r Report) {
+				if r.Verdict.Text != "網路正常。" {
+					t.Errorf("結論文字 = %q，預期一般「網路正常。」", r.Verdict.Text)
+				}
+				if r.Verdict.Contact != "" {
+					t.Errorf("參考節點失敗不應顯示窗口：%q", r.Verdict.Contact)
+				}
+				if !strings.Contains(r.Lights[2].Summary, "（參考）") {
+					t.Errorf("單位網路摘要應含「（參考）」：%q", r.Lights[2].Summary)
+				}
+			},
+		},
+		{
+			name: "必要節點沒有回應、參考節點正常",
+			id:   "T23",
+			cfg:  Config{Org: "範例機關", Contact: map[string]string{"org_network": "單位資訊室 分機 2211"}},
+			mod: func(f *Facts) {
+				f.Checkpoints = []CheckpointResult{
+					{Name: "單位防火牆", Host: "10.1.0.1", Check: "tcp:443", Err: ErrTimeout},
+					{Name: "內部入口網", Host: "10.1.0.2", Check: "tcp:443", Reference: true, OK: true, Ms: 5},
+				}
+			},
+			code: OK,
+			check: func(t *testing.T, r Report) {
+				if r.Verdict.Text != "網路正常，但部分單位網路節點沒有回應。" {
+					t.Errorf("結論文字 = %q，預期 okOrgPartial 的說法", r.Verdict.Text)
+				}
+				if r.Verdict.Contact != "單位資訊室 分機 2211" {
+					t.Errorf("窗口 = %q，預期單位資訊室 分機 2211", r.Verdict.Contact)
+				}
+			},
+		},
+		{
+			name: "所有節點都沒有回應、其中有必要節點",
+			id:   "T23",
+			cfg:  Config{Org: "範例機關", Contact: map[string]string{"org_network": "單位資訊室 分機 2211"}},
+			mod: func(f *Facts) {
+				f.Checkpoints = []CheckpointResult{
+					{Name: "單位防火牆", Host: "10.1.0.1", Check: "tcp:443", Err: ErrTimeout},
+					{Name: "內部入口網", Host: "10.1.0.2", Check: "tcp:443", Reference: true, Err: ErrTimeout},
+				}
+			},
+			code: OK,
+			check: func(t *testing.T, r Report) {
+				if r.Verdict.Text != "可以連到網際網路，但單位網路的節點都沒有回應。" {
+					t.Errorf("結論文字 = %q，預期 okOrgDown 的說法", r.Verdict.Text)
+				}
+			},
+		},
+		{
+			name: "全部都是參考節點且都沒有回應、網路正常",
+			id:   "T23",
+			cfg:  Config{Org: "範例機關", Contact: map[string]string{"org_network": "單位資訊室 分機 2211"}},
+			mod: func(f *Facts) {
+				f.Checkpoints = []CheckpointResult{
+					{Name: "內部入口網", Host: "10.1.0.2", Check: "tcp:443", Reference: true, Err: ErrTimeout},
+					{Name: "內部檔案伺服器", Host: "10.1.0.3", Check: "tcp:443", Reference: true, Err: ErrTimeout},
+				}
+			},
+			code: OK,
+			check: func(t *testing.T, r Report) {
+				if r.Verdict.Text != "網路正常。" {
+					t.Errorf("結論文字 = %q，預期一般「網路正常。」", r.Verdict.Text)
+				}
+				if r.Verdict.Contact != "" {
+					t.Errorf("只有參考節點失敗不應顯示窗口：%q", r.Verdict.Contact)
+				}
+			},
+		},
+		{
+			name: "全部都是參考節點且都沒有回應、連不出去",
+			id:   "T23",
+			cfg:  Config{Org: "範例機關", Contact: map[string]string{"org_network": "單位資訊室 分機 2211"}},
+			mod: func(f *Facts) {
+				f.Checkpoints = []CheckpointResult{
+					{Name: "內部入口網", Host: "10.1.0.2", Check: "tcp:443", Reference: true, Err: ErrTimeout},
+					{Name: "內部檔案伺服器", Host: "10.1.0.3", Check: "tcp:443", Reference: true, Err: ErrTimeout},
+				}
+				f.Direct = failAll(f.Direct, ErrTimeout)
+				f.PublicDNS = failAll(f.PublicDNS, ErrTimeout)
+				f.DNS = failAll(f.DNS, ErrTimeout)
+				f.Sites = failSites(f.Sites, ErrTimeout)
+			},
+			code: OrgNetwork,
+		},
+		{
+			name: "必要節點沒有回應、只有參考節點有回應、連不出去",
+			id:   "T23",
+			cfg:  Config{Org: "範例機關", Contact: map[string]string{"org_network": "單位資訊室 分機 2211"}},
+			mod: func(f *Facts) {
+				f.Checkpoints = []CheckpointResult{
+					{Name: "單位防火牆", Host: "10.1.0.1", Check: "tcp:443", Err: ErrTimeout},
+					{Name: "內部入口網", Host: "10.1.0.2", Check: "tcp:443", Reference: true, OK: true, Ms: 5},
+				}
+				f.Direct = failAll(f.Direct, ErrTimeout)
+				f.PublicDNS = failAll(f.PublicDNS, ErrTimeout)
+				f.DNS = failAll(f.DNS, ErrTimeout)
+				f.Sites = failSites(f.Sites, ErrTimeout)
+			},
+			code: ISP,
+			check: func(t *testing.T, r Report) {
+				if r.Verdict.Text != "單位網路有節點回應，但從單位往外的線路不通。" {
+					t.Errorf("結論文字 = %q，預期 ispOrg 的說法", r.Verdict.Text)
+				}
+			},
+		},
 	}
 
 	for _, c := range cases {
