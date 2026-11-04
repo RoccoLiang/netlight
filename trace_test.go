@@ -140,7 +140,13 @@ func TestTraceRouteLive(t *testing.T) {
 		t.Fatalf("traceRoute 發生錯誤：%v", err)
 	}
 	if len(hops) == 0 {
-		t.Fatal("應至少有一站回應")
+		// 有些網路（例如雲端 CI）整個擋掉 ICMP：連 ping 1.1.1.1 都不通時略過；ping 通卻追蹤不到才算失敗
+		pctx, pcancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer pcancel()
+		if perr := icmpPing(pctx, "1.1.1.1"); perr != nil {
+			t.Skipf("此網路不允許 ICMP（ping 1.1.1.1 也沒有回應：%v）", perr)
+		}
+		t.Fatal("ping 1.1.1.1 有回應，但路由追蹤沒有任何一站回應")
 	}
 	for i, h := range hops {
 		if net.ParseIP(h.IP) == nil {
