@@ -208,10 +208,10 @@ func TestClearMapFrame(t *testing.T) {
 
 func TestRouteMapLines(t *testing.T) {
 	cases := []struct {
-		name      string
-		f         Facts
-		egressRed bool
-		want      []string
+		name         string
+		f            Facts
+		internetDown bool
+		want         []string
 	}{
 		{
 			name: "Target 為空",
@@ -262,22 +262,22 @@ func TestRouteMapLines(t *testing.T) {
 				Route: RouteResult{
 					Target: "1.1.1.1",
 					Hops: []Hop{
-						{TTL: 1, IP: "192.168.1.254"},
+						{TTL: 1, IP: "198.51.100.254"},
 						{TTL: 2, IP: "10.1.0.1"},
 						{TTL: 3, IP: "1.1.1.1", Reached: true},
 					},
 				},
 			},
 			want: []string{
-				"├ 1. 192.168.1.254",
+				"├ 1. 198.51.100.254",
 				"├ 2. 10.1.0.1（單位防火牆）",
 				"└ 3. 1.1.1.1（抵達）",
 			},
 		},
 		{
-			name:      "對外連線 Red 且未抵達",
-			f:         factsOfRouteBroken(),
-			egressRed: true,
+			name:         "對外連線 Red 且未抵達",
+			f:            factsOfRouteBroken(),
+			internetDown: true,
 			want: []string{
 				"├ 1. 192.168.1.1（路由器）",
 				"┊",
@@ -296,16 +296,16 @@ func TestRouteMapLines(t *testing.T) {
 					},
 				},
 			},
-			egressRed: true,
+			internetDown: true,
 			want: []string{
 				"├ 1. 192.168.1.1（路由器）",
 				"└ 2. 1.1.1.1（抵達）",
 			},
 		},
 		{
-			name:      "對外連線未 Red 且未抵達",
-			f:         factsOfRouteBroken(),
-			egressRed: false,
+			name:         "對外連線未 Red 且未抵達",
+			f:            factsOfRouteBroken(),
+			internetDown: false,
 			want: []string{
 				"├ 1. 192.168.1.1（路由器）",
 				"┊",
@@ -314,7 +314,11 @@ func TestRouteMapLines(t *testing.T) {
 		},
 	}
 	for _, c := range cases {
-		got := routeMapLines(c.f, c.egressRed)
+		got := routeMapLines(c.f, c.internetDown)
+		if c.want == nil && got != nil {
+			t.Errorf("%s：routeMapLines = %q，預期 nil", c.name, got)
+			continue
+		}
 		if !slices.Equal(got, c.want) {
 			t.Errorf("%s：routeMapLines =\n%q\n預期\n%q", c.name, got, c.want)
 		}
@@ -354,7 +358,7 @@ func TestRenderMapRouteGolden(t *testing.T) {
 }
 
 func TestRenderMapRouteBroken(t *testing.T) {
-	f := factsOfRouteBroken()
+	f := factsOfRouteBroken() // TTL 1→3 有缺口、未抵達
 	f.Route.Target = "1.1.1.1"
 	lights := []Light{
 		{Name: "本機網路", Status: Green, Summary: "Wi-Fi 192.168.1.23"},
@@ -367,17 +371,26 @@ func TestRenderMapRouteBroken(t *testing.T) {
 	renderMap(&b, lights, false, routeMapLines(f, true))
 	lines := splitMapLines(t, b.String())
 
-	// 分支行前綴為「  ┆   」，最後一行含「◀ 最後回應」（不含 TTL 缺口的「┊」行）
+	// 每一條分支行（含 TTL 缺口的「┊」行）前綴都是「  ┆   」，最後一行含「◀ 最後回應」
 	branchLines := 0
 	lastBranch := ""
 	for _, ln := range lines {
-		if strings.HasPrefix(ln, "  ┆   ├ ") || strings.HasPrefix(ln, "  ┆   └ ") {
+		if strings.HasPrefix(ln, "  ┆   ") {
 			branchLines++
 			lastBranch = ln
 		}
 	}
-	if branchLines != 2 {
-		t.Errorf("路由分支行數 = %d，預期 2", branchLines)
+	if branchLines != 3 { // ├ 1. …、┊、└ 3. …
+		t.Errorf("路由分支行數 = %d，預期 3", branchLines)
+	}
+	gap := false
+	for _, ln := range lines {
+		if ln == "  ┆   ┊" {
+			gap = true
+		}
+	}
+	if !gap {
+		t.Errorf("TTL 缺口應有一行「  ┆   ┊」")
 	}
 	if !strings.Contains(lastBranch, "◀ 最後回應") {
 		t.Errorf("最後一行分支行應含「◀ 最後回應」：%q", lastBranch)
@@ -395,5 +408,93 @@ func TestRenderMapRouteBroken(t *testing.T) {
 	}
 	if brokenLines != 1 {
 		t.Errorf("「◀ 斷在這裡」出現 %d 次，預期 1 次", brokenLines)
+	}
+}
+
+func TestRenderMapRouteDetailOrder(t *testing.T) {
+	f := factsOfRouteBroken()
+	f.Route.Target = "1.1.1.1"
+	lights := []Light{
+		{Name: "本機網路", Status: Green, Summary: "Wi-Fi 192.168.1.23"},
+		{Name: "路由器", Status: Green, Summary: "192.168.1.1 有回應"},
+		{Name: "對外連線", Status: Green, Summary: "可連到網際網路", Evidence: []string{"1.1.1.1:443 成功", "8.8.8.8:443 成功"}},
+		{Name: "網址查詢", Status: Green, Summary: "正常"},
+		{Name: "網站連線", Status: Green, Summary: "4/4 個網站正常"},
+	}
+	var b bytes.Buffer
+	renderMap(&b, lights, true, routeMapLines(f, false))
+	lines := splitMapLines(t, b.String())
+
+	// 順序：對外連線站行 → 它的全部證據行 → 全部分支行 → 連接線
+	egressIdx := -1
+	for i, ln := range lines {
+		if strings.HasPrefix(ln, "  ● 對外連線") {
+			egressIdx = i
+			break
+		}
+	}
+	if egressIdx < 0 {
+		t.Fatalf("找不到「對外連線」站行")
+	}
+	wantOrder := append([]string(nil), lines[egressIdx:egressIdx+6]...)
+	want := []string{
+		"  ● 對外連線　🟢 正常  可連到網際網路",
+		"  │     · 1.1.1.1:443 成功",
+		"  │     · 8.8.8.8:443 成功",
+		"  │   ├ 1. 192.168.1.1（路由器）",
+		"  │   ┊",
+		"  │   └ 3. 198.51.100.7",
+	}
+	if !slices.Equal(wantOrder, want) {
+		t.Errorf("對外連線段輸出 =\n%q\n預期\n%q", wantOrder, want)
+	}
+	if lines[egressIdx+6] != "  │" {
+		t.Errorf("分支行之後應為連接線「  │」：%q", lines[egressIdx+6])
+	}
+}
+
+func TestRenderMapRouteLastLight(t *testing.T) {
+	f := factsOfRouteBroken()
+	f.Route.Target = "1.1.1.1"
+	lights := []Light{
+		{Name: "本機網路", Status: Green, Summary: "Wi-Fi 192.168.1.23"},
+		{Name: "路由器", Status: Green, Summary: "192.168.1.1 有回應"},
+		{Name: "對外連線", Status: Green, Summary: "可連到網際網路"},
+	}
+	var b bytes.Buffer
+	renderMap(&b, lights, false, routeMapLines(f, false))
+	lines := splitMapLines(t, b.String())
+
+	want := []string{
+		"  ● 本機網路　🟢 正常  Wi-Fi 192.168.1.23",
+		"  │",
+		"  ● 路由器　　🟢 正常  192.168.1.1 有回應",
+		"  │",
+		"  ● 對外連線　🟢 正常  可連到網際網路",
+		"      ├ 1. 192.168.1.1（路由器）",
+		"      ┊",
+		"      └ 3. 198.51.100.7",
+	}
+	if !slices.Equal(lines, want) {
+		t.Errorf("輸出 =\n%q\n預期\n%q", lines, want)
+	}
+}
+
+func TestInternetDownFromLights(t *testing.T) {
+	cases := []struct {
+		name   string
+		lights []Light
+		want   bool
+	}{
+		{"Red", []Light{{Name: "對外連線", Status: Red}}, true},
+		{"Skip", []Light{{Name: "對外連線", Status: Skip}}, true},
+		{"Green", []Light{{Name: "對外連線", Status: Green}}, false},
+		{"Yellow", []Light{{Name: "對外連線", Status: Yellow}}, false},
+		{"沒有對外連線", []Light{{Name: "本機網路", Status: Red}}, false},
+	}
+	for _, c := range cases {
+		if got := internetDownFromLights(c.lights); got != c.want {
+			t.Errorf("%s：internetDownFromLights = %v，預期 %v", c.name, got, c.want)
+		}
 	}
 }

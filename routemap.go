@@ -60,7 +60,7 @@ func mapFrame(names []string, states []mapState, spin int) []string {
 }
 
 // routeMapLines：路線圖中「對外連線」底下的路由分支行（不含前綴的連接線，由 renderMap 補上）
-func routeMapLines(f Facts, egressRed bool) []string {
+func routeMapLines(f Facts, internetDown bool) []string {
 	if f.Route.Target == "" {
 		return nil
 	}
@@ -82,7 +82,7 @@ func routeMapLines(f Facts, egressRed bool) []string {
 			lines = append(lines, "┊")
 		}
 	}
-	if egressRed && !f.Route.Hops[last].Reached {
+	if internetDown && !f.Route.Hops[last].Reached {
 		lines[len(lines)-1] += "  ◀ 最後回應"
 	}
 	return lines
@@ -208,16 +208,20 @@ func runMap(cfg Config, detail bool) int {
 	clearMapFrame(os.Stdout, prevLines)
 
 	r := decide(f, cfg)
-	egressRed := false
-	for _, l := range r.Lights {
-		if l.Name == "對外連線" && l.Status == Red {
-			egressRed = true
-		}
-	}
-	renderMap(os.Stdout, r.Lights, detail, routeMapLines(f, egressRed))
+	renderMap(os.Stdout, r.Lights, detail, routeMapLines(f, internetDownFromLights(r.Lights)))
 	fmt.Fprintln(os.Stdout)
 	renderVerdict(os.Stdout, r.Verdict)
 	return r.Verdict.Code.ExitCode()
+}
+
+// internetDownFromLights：「對外連線」為 Red（自己故障）或 Skip（前一段故障）時網路不通
+func internetDownFromLights(lights []Light) bool {
+	for _, l := range lights {
+		if l.Name == "對外連線" {
+			return l.Status == Red || l.Status == Skip
+		}
+	}
+	return false
 }
 
 // useMapMode：路線圖模式只在互動式終端機、支援顏色與 emoji、非 plain、非 JSON 時使用
