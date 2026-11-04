@@ -458,7 +458,7 @@ func TestDecideScenarios(t *testing.T) {
 			code: OK,
 			check: func(t *testing.T, r Report) {
 				ev := strings.Join(r.Lights[2].Evidence, "\n")
-				if !strings.Contains(ev, "經由代理（顯示的是代理的出口）") {
+				if !strings.Contains(ev, "經由代理（這是代理伺服器的對外 IP）") {
 					t.Errorf("證據應含代理說明：%q", ev)
 				}
 			},
@@ -492,7 +492,7 @@ func TestDecideScenarios(t *testing.T) {
 			code: OK,
 			check: func(t *testing.T, r Report) {
 				ev := strings.Join(r.Lights[2].Evidence, "\n")
-				if strings.Contains(ev, "代理的出口") {
+				if strings.Contains(ev, "代理伺服器的對外 IP") {
 					t.Errorf("命中例外清單不應標註代理出口：%q", ev)
 				}
 				if !strings.Contains(ev, "對外 IP：") {
@@ -918,7 +918,7 @@ func TestDecideScenarios(t *testing.T) {
 				if !strings.Contains(r.Verdict.Text, "查不到") || !strings.Contains(r.Verdict.Text, "Google") {
 					t.Errorf("結論文字應說查不到網址並列出網站名稱：%q", r.Verdict.Text)
 				}
-				if strings.Contains(r.Verdict.Text, "本身異常") {
+				if strings.Contains(r.Verdict.Text, "問題出在") {
 					t.Errorf("結論不應說成網站本身異常：%q", r.Verdict.Text)
 				}
 				if r.Lights[3].Status != Yellow || !strings.Contains(r.Lights[3].Summary, "部分網址在這台電腦查不到") || !strings.Contains(r.Lights[3].Summary, "www.google.com") {
@@ -950,7 +950,7 @@ func TestDecideScenarios(t *testing.T) {
 			},
 			code: SiteCode,
 			check: func(t *testing.T, r Report) {
-				if !strings.Contains(r.Verdict.Text, "本身異常") {
+				if !strings.Contains(r.Verdict.Text, "問題出在") {
 					t.Errorf("混有非 DNS 因素時應維持既有 SITE 說法：%q", r.Verdict.Text)
 				}
 			},
@@ -1063,8 +1063,8 @@ func TestDecideScenarios(t *testing.T) {
 			},
 			code: SiteCode,
 			check: func(t *testing.T, r Report) {
-				if !strings.Contains(r.Verdict.Text, "本身異常") || strings.Contains(r.Verdict.Text, "查不到") {
-					t.Errorf("已有回應的網站應維持本身異常的說法：%q", r.Verdict.Text)
+				if !strings.Contains(r.Verdict.Text, "問題出在") || strings.Contains(r.Verdict.Text, "查不到") {
+					t.Errorf("已有回應的網站應維持問題出在網站本身的說法：%q", r.Verdict.Text)
 				}
 			},
 		},
@@ -1109,8 +1109,8 @@ func TestDecideScenarios(t *testing.T) {
 			},
 			code: SiteCode,
 			check: func(t *testing.T, r Report) {
-				if !strings.Contains(r.Verdict.Text, "本身異常") || strings.Contains(r.Verdict.Text, "查不到") {
-					t.Errorf("直連且已有回應的網站應維持本身異常的說法：%q", r.Verdict.Text)
+				if !strings.Contains(r.Verdict.Text, "問題出在") || strings.Contains(r.Verdict.Text, "查不到") {
+					t.Errorf("直連且已有回應的網站應維持問題出在網站本身的說法：%q", r.Verdict.Text)
 				}
 			},
 		},

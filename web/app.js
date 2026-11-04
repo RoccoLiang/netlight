@@ -155,7 +155,7 @@
 
 	function setButtons() {
 		runBtn.disabled = running;
-		runBtn.textContent = running ? "檢查中…約 10 秒" : (hasResult ? "重新檢查" : "開始檢查");
+		runBtn.textContent = running ? "檢查中…" : (hasResult ? "重新檢查" : "開始檢查");
 		copyBtn.disabled = running || !safeText;
 		copyFullBtn.disabled = running || !reportText;
 	}
@@ -300,7 +300,7 @@
 			buildRows(layoutNames);
 		}
 		setChecking();
-		verdictText.textContent = "檢查中，約 10 秒…";
+		verdictText.textContent = "檢查中，最多約 10 秒…";
 		verdictAction.textContent = "";
 		stageSeen = {};
 		fetch("api/run", { method: "POST" }).then(function (res) {

@@ -252,17 +252,17 @@ var verdicts = map[Code]verdictRow{
 	NoDHCP:       {Text: "電腦有連上網路，但沒有從路由器拿到位址。", Action: "將路由器拔電 30 秒再插回，等 2 分鐘後再執行一次。"},
 	Portal:       {Text: "這個 Wi-Fi 需要先登入（飯店、咖啡廳、機場常見）。", Action: "打開瀏覽器，在網址列輸入 neverssl.com 後按 Enter，完成登入後再執行一次。", Egress: "被導向登入頁面", Sites: "被登入頁面攔截"},
 	Clock:        {Text: "電腦的日期或時間不正確，導致加密連線失敗。", Action: "打開電腦的「日期與時間」設定，開啟「自動設定時間」，再執行一次。", Sites: "憑證驗證失敗（時間不正確）"},
-	VPNBroken:    {Text: "VPN 已連線但不通，流量卡在 VPN。", Action: "先中斷 VPN 再執行一次；工作需要 VPN 請聯絡公司 IT。"},
-	ProxyCode:    {Text: "這台電腦設定了代理伺服器，但透過它連不出去。", Action: "公司電腦請聯絡 IT；家用電腦請在電腦的網路設定中關閉「代理伺服器」，再執行一次。", Sites: "透過代理伺服器連不上"},
-	ProxyPACCode: {Text: "這台電腦使用「自動代理設定（PAC）」，直接連線也不通，無法確定是代理還是線路的問題。", Action: "公司電腦請聯絡 IT；家用電腦請在電腦的網路設定中關閉「自動代理設定」再執行一次，仍不通請聯絡網路業者。", Sites: "直接連線也連不上"},
+	VPNBroken:    {Text: "VPN 已連線，但透過它連不出去。", Action: "先中斷 VPN 再執行一次；工作需要 VPN 的話，請聯絡公司 IT。"},
+	ProxyCode:    {Text: "這台電腦設定了代理伺服器，但透過它連不出去。", Action: "公司電腦請聯絡 IT；家用電腦請在網路設定中關閉「代理伺服器」後再執行一次。", Sites: "透過代理伺服器連不上"},
+	ProxyPACCode: {Text: "這台電腦使用「自動代理設定（PAC）」，直接連線也不通，無法確定是代理還是線路的問題。", Action: "公司電腦請聯絡 IT；家用電腦請在網路設定中關閉「自動代理設定」後再執行一次，仍不通請聯絡網路業者。", Sites: "直接連線也連不上"},
 	ISP:          {Text: "路由器正常，但從路由器出去的線路不通。", Action: "將數據機拔電 30 秒再插回；仍不行請聯絡網路業者（如中華電信）報修。"},
 	RouterOrISP:  {Text: "問題在路由器或電信線路。", Action: "將路由器和數據機拔電 30 秒再插回；仍不行請聯絡網路業者（如中華電信）。"},
 	OrgNetwork:   {Text: "單位設定的網路節點都沒有回應，問題可能在路由器、單位內部網路或出口設備。", Action: "請聯絡單位資訊人員，並提供這個畫面的內容。"},
 	DNSCode:      {Text: "線路是通的，但「查網址」的服務（DNS）故障。", Action: "重開路由器；仍不行請聯絡網路業者（如中華電信）。"},
 	TLSIntercept: {Text: "加密連線被攔截，常見原因是防毒軟體或公司資安設備。", Action: "暫時關閉防毒軟體的「HTTPS 掃描」再試；公司電腦請聯絡 IT。", Sites: "加密連線被攔截"},
 	Filtered:     {Text: "網路是通的，但網站連線被擋住。", Action: "這個網路可能有過濾或防火牆，請聯絡網路管理者（公司 IT 或場地人員）。"},
-	SiteCode:     {Text: "你的網路正常，是「%s」本身異常。", Action: "請稍後再試，或聯絡該網站客服。"},
-	Unstable:     {Egress: "連線時好時壞", Text: "網路時通時不通，部分連線會中斷或逾時。", Action: "將路由器與數據機拔電 30 秒再插回；使用 Wi-Fi 請靠近路由器再試。仍不行請聯絡網路業者，並說明「網路時好時壞」。"},
+	SiteCode:     {Text: "你的網路正常，問題出在「%s」本身。", Action: "請稍後再試，或聯絡該網站客服。"},
+	Unstable:     {Egress: "連線時好時壞", Text: "網路時通時不通，部分連線會中斷或逾時。", Action: "將路由器與數據機拔電 30 秒再插回；使用 Wi-Fi 的話，請靠近路由器再試。仍不行請聯絡網路業者，並說明「網路時好時壞」。"},
 	Unknown:      {Text: "證據不足，無法判斷問題在哪。", Action: "重開路由器後再執行一次；仍不行請把這個畫面截圖給協助你的人。"},
 	dnsVPN:       {As: DNSCode, Text: "線路是通的，但「查網址」的服務（DNS）故障。目前經由 VPN，DNS 通常由公司提供。", Action: "請聯絡公司 IT 檢查 VPN 的 DNS 設定；沒有在用公司 VPN 的話，先中斷 VPN 再執行一次。"},
 	dnsNoServer:  {As: DNSCode, Text: "電腦沒有拿到查網址的設定（DNS 伺服器）。", Action: "將路由器拔電 30 秒再插回，等 2 分鐘後再執行一次；手動設定過網路的電腦，請把 DNS 改回「自動取得」。"},
@@ -272,7 +272,7 @@ var verdicts = map[Code]verdictRow{
 	ispOrg:       {As: ISP, Text: "單位網路有節點回應，但從單位往外的線路不通。", Action: "請聯絡單位資訊人員；單位的對外線路通常由資訊人員向電信業者或 GSN 報修。"},
 	siteDNS:      {As: SiteCode, Text: "你的網路正常，但查不到「%s」的網址，所以連不上。", Action: "請稍後再試；如果持續發生，公司或單位的電腦請聯絡 IT，家用電腦請將路由器拔電 30 秒再插回。"},
 	okCustomOnly: {As: OK, Text: "測試的網站都連得上，但這次沒有確認網際網路。", Action: "如果還需要使用外部網站，請另外確認；有問題請聯絡 IT。"},
-	okOrgDown:    {As: OK, Text: "可以連到網際網路，但單位網路的節點都沒有回應。", Action: "如果你現在應該在單位網路內，請聯絡單位資訊人員；在單位外（例如在家）則屬正常。"},
+	okOrgDown:    {As: OK, Text: "可以連到網際網路，但單位網路的節點都沒有回應。", Action: "如果你現在應該在單位網路內，請聯絡單位資訊人員；如果在單位外（例如在家），這是正常的。"},
 	okOrgPartial: {As: OK, Text: "網路正常，但部分單位網路節點沒有回應。", Action: "如果需要使用沒有回應的單位系統，請聯絡單位資訊人員。"},
 	noGateway:    {As: NoDHCP, Text: "電腦有位址，但找不到路由器（沒有預設閘道）。", Action: "將路由器拔電 30 秒再插回，等 2 分鐘後再執行一次；如果這台電腦的 IP 是手動設定的，請確認有填寫「路由器」（預設閘道）。"},
 }
@@ -621,7 +621,7 @@ func lightGateway(f Facts, prev Light, internetOK, noRouter bool) Light {
 	case gw == "" && internetOK:
 		l.Status, l.Summary = Green, "經由 "+f.Local.VPN+" 對外"
 		if f.Local.VPN == "" {
-			l.Summary = "沒有一般路由器，但可以對外"
+			l.Summary = "沒有一般路由器，但可以連到網際網路"
 		}
 	case noRouter:
 		l.Status, l.Summary = Red, "找不到路由器"
@@ -753,8 +753,8 @@ func lightEgress(f Facts, prev Light, internetOK, anyDirect, anyReached, certAny
 	case row.Egress != "":
 		l.Status, l.Summary = Yellow, row.Egress
 	case internetOK && !anyDirect && !anyReached && !certAny:
-		l.Status, l.Summary = Yellow, "只有部分連線能對外"+note
-		l.Evidence = append(l.Evidence, "直連 IP 與網站都失敗，但公共 DNS 查詢成功：線路可對外，連線可能被過濾")
+		l.Status, l.Summary = Yellow, "只有部分連線能連到網際網路"+note
+		l.Evidence = append(l.Evidence, "直連 IP 與網站都失敗，但公共 DNS 查詢成功：線路是通的，連線可能被過濾")
 	case internetOK:
 		l.Status, l.Summary = Green, "可連到網際網路"+note
 		if !anyDirect && len(f.Direct) > 0 {
@@ -777,7 +777,7 @@ func lightEgress(f Facts, prev Light, internetOK, anyDirect, anyReached, certAny
 		}
 		switch {
 		case (f.Local.Proxy.Mode == ProxyExplicit || f.Local.Proxy.Mode == ProxyEnv) && !bypassed(first.Host, f.Local.Proxy.Bypass):
-			line += "，經由代理（顯示的是代理的出口）"
+			line += "，經由代理（這是代理伺服器的對外 IP）"
 		case f.Local.Proxy.Mode == ProxyPAC:
 			line += "，使用自動代理設定（無法確定是否經由代理）"
 		case f.Local.VPN != "":

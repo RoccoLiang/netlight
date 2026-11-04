@@ -35,7 +35,7 @@ func platformLocal(ctx context.Context, lo *Local) {
 		lo.Kind = "Wi-Fi"
 	}
 	if strings.Contains(strings.ToLower(readFile("/proc/sys/kernel/osrelease")), "microsoft") {
-		lo.Notes = append(lo.Notes, "偵測到 WSL：結果反映的是虛擬網路，請改用 Windows 版")
+		lo.Notes = append(lo.Notes, "偵測到 WSL：檢查到的是虛擬網路，不是 Windows 實際使用的網路，請改用 Windows 版")
 	}
 	lo.Proxy = parseGsettingsProxy(
 		command(ctx, "gsettings", "get", "org.gnome.system.proxy", "mode"),
