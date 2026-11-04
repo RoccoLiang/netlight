@@ -156,8 +156,34 @@ func TestPhaseRecorderFrozen(t *testing.T) {
 	}
 }
 
-// 多個 goroutine 同時呼叫 hook（搭配 -race 檢查）
-func TestPhaseRecorderConcurrent(t *testing.T) {
+// 8 個 goroutine 並行呼叫完整的 hook 序列（不同時 snapshot），搭配 -race 檢查
+func TestPhaseRecorderConcurrentHooks(t *testing.T) {
+	r := newPhaseRecorder()
+	tr := r.trace()
+	var wg sync.WaitGroup
+	for i := range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key := fmt.Sprintf("192.0.2.%d:443", i)
+			tr.ConnectStart("tcp", key)
+			tr.DNSStart(httptrace.DNSStartInfo{})
+			tr.DNSDone(httptrace.DNSDoneInfo{})
+			tr.ConnectDone("tcp", key, nil)
+			tr.TLSHandshakeStart()
+			tr.TLSHandshakeDone(tls.ConnectionState{}, nil)
+			tr.WroteRequest(httptrace.WroteRequestInfo{})
+			tr.GotFirstResponseByte()
+		}()
+	}
+	wg.Wait()
+	if p := r.snapshot(); p.Reached != "response" {
+		t.Errorf("並行呼叫後 Reached = %q，預期 \"response\"", p.Reached)
+	}
+}
+
+// hook 序列與 snapshot() 並行；凍結之後結果不再改變（不斷言 Reached 的值）
+func TestPhaseRecorderConcurrentSnapshot(t *testing.T) {
 	r := newPhaseRecorder()
 	tr := r.trace()
 	var wg sync.WaitGroup
@@ -182,8 +208,10 @@ func TestPhaseRecorderConcurrent(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	if p := r.snapshot(); p.Reached != "response" {
-		t.Errorf("並行呼叫後 Reached = %q，預期 \"response\"", p.Reached)
+	p1 := r.snapshot()
+	p2 := r.snapshot()
+	if *p1 != *p2 {
+		t.Errorf("並行期間的 snapshot 之後結果不應改變：%+v vs %+v", p1, p2)
 	}
 }
 
