@@ -13,7 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -369,7 +369,7 @@ func newWebHandler(cfg Config, token, host string, st *webState, done func()) ht
 					Type:     "report",
 					Result:   jsonReport{version, now.Format(time.RFC3339), f.Local.OS, rep, f},
 					Text:     webReportText(rep, f, now),
-					SafeText: webSafeReportText(rep, f.Local.OS, now),
+					SafeText: webSafeReportText(rep, f, now),
 				})
 				if streamErr == nil && flusher != nil {
 					flusher.Flush()
@@ -412,38 +412,61 @@ func webReportText(rep Report, f Facts, now time.Time) string {
 	return b.String()
 }
 
-// safeLabelToken：一段連續的 ASCII 英數與位址常用符號（含底線、埠號、方括號、IPv6、% 介面名稱）
-var safeLabelToken = regexp.MustCompile(`[A-Za-z0-9_.:/@%\[\]-]+`)
-
-// safeLabel：把看起來像位址的文字換成「（已隱藏）」，一般名稱原樣保留。
-// 規則刻意保守：任何一段 ASCII 字元只要含 . : / @ 其中之一就整段隱藏（例如「系統 1.2」也會被隱藏），寧可多遮也不漏遮。
-// 只用於設定檔可能填入位址的欄位（SITE 結論中的網站名稱）；程式固定文字與聯絡資訊不套用。
-func safeLabel(s string) string {
-	return safeLabelToken.ReplaceAllStringFunc(s, func(tok string) string {
-		if strings.ContainsAny(tok, ".:/@") {
-			return "（已隱藏）"
+// safeSiteText：SITE 結論中「」內的網站名稱改用安全名稱（白名單，不猜位址的長相）：
+// 預設網站以網址比對、改用程式內建的名稱；設定檔自訂的網站一律改為「自訂網站 N」（N 依設定順序，IT 可對照完整回報）。
+// 名稱對不上或格式不符時，一律隱藏。
+func safeSiteText(text string, sites []Site) string {
+	i := strings.Index(text, "「")
+	j := strings.Index(text, "」")
+	if i < 0 || j < i {
+		return "你的網路正常，但部分網站連線異常（網站名稱已隱藏）。"
+	}
+	safe := map[string]string{} // 網站名稱 → 安全名稱
+	custom := map[string]int{}  // 自訂網站網址 → 編號
+	for _, s := range sites {
+		name := ""
+		if k := slices.IndexFunc(defaultTargets, func(t Target) bool { return t.URL == s.Target }); k >= 0 {
+			name = defaultTargets[k].Name
+		} else {
+			if _, ok := custom[s.Target]; !ok {
+				custom[s.Target] = len(custom) + 1
+			}
+			name = fmt.Sprintf("自訂網站 %d", custom[s.Target])
 		}
-		return tok
-	})
+		if prev, ok := safe[s.Name]; ok && prev != name {
+			name = "（已隱藏）" // 同名但對應不同網站：無法確定，隱藏
+		}
+		safe[s.Name] = name
+	}
+	start := i + len("「")
+	parts := strings.Split(text[start:j], "、")
+	for k, p := range parts {
+		if n, ok := safe[p]; ok {
+			parts[k] = n
+		} else {
+			parts[k] = "（已隱藏）"
+		}
+	}
+	return text[:start] + strings.Join(parts, "、") + text[j:]
 }
 
 // webSafeReportText：可放心貼到群組的回報摘要（不含燈號說明、技術證據、IP 與網址）
-func webSafeReportText(rep Report, osName string, now time.Time) string {
+func webSafeReportText(rep Report, f Facts, now time.Time) string {
 	now = now.In(webTPE)
 	var b strings.Builder
 	fmt.Fprintln(&b, "【netlight 網路診斷摘要】")
 	fmt.Fprintf(&b, "時間：%s 台灣標準時間\n", now.Format("2006-01-02 15:04"))
-	fmt.Fprintf(&b, "版本：netlight v%s · %s\n", version, osName)
+	fmt.Fprintf(&b, "版本：netlight v%s · %s\n", version, f.Local.OS)
 	fmt.Fprintf(&b, "結論碼：%s\n", rep.Verdict.Code)
 	rows := make([]string, len(rep.Lights))
 	for i, l := range rep.Lights {
 		rows[i] = l.Name + " " + statusWord[l.Status]
 	}
 	fmt.Fprintf(&b, "燈號：%s\n", strings.Join(rows, "｜"))
-	// 只有 SITE 的結論文字含設定檔填入的網站名稱；其他結論是程式固定文字（可能提到公開的 8.8.8.8），不遮蔽
+	// 只有 SITE 的結論文字含設定檔填入的網站名稱；其他結論是程式固定文字（可能提到公開的 8.8.8.8），原樣保留
 	text := rep.Verdict.Text
 	if rep.Verdict.Code == SiteCode {
-		text = safeLabel(text)
+		text = safeSiteText(text, f.Sites)
 	}
 	fmt.Fprintf(&b, "結論：%s\n", text)
 	fmt.Fprintf(&b, "建議：%s\n", rep.Verdict.Action)

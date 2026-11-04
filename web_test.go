@@ -737,30 +737,34 @@ func TestWebReportText(t *testing.T) {
 }
 
 // TestSafeLabel：safeLabel 只遮蔽看起來像位址的片段，一般名稱原樣保留
-func TestSafeLabel(t *testing.T) {
+func TestSafeSiteText(t *testing.T) {
+	sites := []Site{
+		{Name: "Google", Probe: Probe{Target: "https://www.google.com"}},
+		{Name: "erp.internal", Probe: Probe{Target: "https://erp.internal"}},
+		{Name: "財務。內網", Probe: Probe{Target: "https://xn--fiq.example"}},
+		{Name: "ERPSRV01", Probe: Probe{Target: "https://erpsrv01"}},
+		{Name: "公司首頁", Probe: Probe{Target: "https://www.cloudflare.com"}}, // 預設網址但自訂名稱：改用內建名稱
+	}
 	cases := []struct{ in, want string }{
-		{"公司 ERP", "公司 ERP"},
-		{"Google", "Google"},
-		{"erp.internal", "（已隱藏）"},
-		{"10.1.2.3", "（已隱藏）"},
-		{"https://erp.example.com/a", "（已隱藏）"},
-		{"fe80::1", "（已隱藏）"},
-		{"「erp.internal」本身異常", "「（已隱藏）」本身異常"},
-		{"erp_server.internal", "（已隱藏）"},
-		{"erp_server.corp.internal", "（已隱藏）"},
-		{"10.1.2.3:8080", "（已隱藏）"},
-		{"http://host/path", "（已隱藏）"},
-		{"2001:db8::1234", "（已隱藏）"},
-		{"[fe80::1%en0]:8080", "（已隱藏）"},
-		{"admin@erp", "（已隱藏）"},
-		{"財務系統（正式）", "財務系統（正式）"},
-		{"ERP_2026", "ERP_2026"},
-		{"系統 1.2", "系統 （已隱藏）"}, // 刻意保守：版本號也會被隱藏
+		{"你的網路正常，是「Google」本身異常。", "你的網路正常，是「Google」本身異常。"},
+		{"你的網路正常，是「erp.internal」本身異常。", "你的網路正常，是「自訂網站 1」本身異常。"},
+		{"你的網路正常，但查不到「財務。內網、ERPSRV01」的網址，所以連不上。", "你的網路正常，但查不到「自訂網站 2、自訂網站 3」的網址，所以連不上。"},
+		{"你的網路正常，是「公司首頁」本身異常。", "你的網路正常，是「Cloudflare」本身異常。"},
+		{"你的網路正常，是「沒列出的名稱」本身異常。", "你的網路正常，是「（已隱藏）」本身異常。"},
+		{"沒有括號的文字", "你的網路正常，但部分網站連線異常（網站名稱已隱藏）。"},
 	}
 	for _, tc := range cases {
-		if got := safeLabel(tc.in); got != tc.want {
-			t.Errorf("safeLabel(%q) = %q，應為 %q", tc.in, got, tc.want)
+		if got := safeSiteText(tc.in, sites); got != tc.want {
+			t.Errorf("safeSiteText(%q) = %q，應為 %q", tc.in, got, tc.want)
 		}
+	}
+	// 同名但對應不同網站：無法確定，一律隱藏
+	dup := []Site{
+		{Name: "系統", Probe: Probe{Target: "https://www.google.com"}},
+		{Name: "系統", Probe: Probe{Target: "https://a.internal"}},
+	}
+	if got := safeSiteText("是「系統」本身異常", dup); got != "是「（已隱藏）」本身異常" {
+		t.Errorf("同名網站應隱藏，得到 %q", got)
 	}
 }
 
@@ -791,7 +795,7 @@ func TestWebSafeReportText(t *testing.T) {
 	// healthy()：逐字比對（燈號說明含 IP，安全摘要不得含）
 	f := healthy()
 	rep := decide(f, Config{})
-	text := webSafeReportText(rep, f.Local.OS, now)
+	text := webSafeReportText(rep, f, now)
 	want := "【netlight 網路診斷摘要】\n" +
 		"時間：2026-11-02 14:03 台灣標準時間\n" +
 		"版本：netlight v" + version + " · macOS\n" +
@@ -815,7 +819,7 @@ func TestWebSafeReportText(t *testing.T) {
 
 	// 非 SITE 的結論是程式固定文字：其中的公開位址（8.8.8.8）原樣保留，不被遮蔽
 	fixed := Report{Verdict: Verdict{Code: DNSCode, Text: verdicts[dnsManual].Text, Action: verdicts[dnsManual].Action}}
-	ft := webSafeReportText(fixed, "macOS", now)
+	ft := webSafeReportText(fixed, Facts{Local: Local{OS: "macOS"}}, now)
 	if !strings.Contains(ft, "結論："+verdicts[dnsManual].Text+"\n") || strings.Contains(ft, "已隱藏") {
 		t.Errorf("固定結論文字不應被遮蔽：\n%s", ft)
 	}
@@ -827,7 +831,7 @@ func TestWebSafeReportText(t *testing.T) {
 	if full := webReportText(repProxy, fp, now); !strings.Contains(full, "10.0.0.8") {
 		t.Errorf("代理情境的完整回報應含代理位址（證明摘要確實有排除）：\n%s", full)
 	}
-	if proxyText := webSafeReportText(repProxy, fp.Local.OS, now); strings.Contains(proxyText, "10.0.0.8") {
+	if proxyText := webSafeReportText(repProxy, fp, now); strings.Contains(proxyText, "10.0.0.8") {
 		t.Errorf("代理情境的安全摘要不得含代理位址 10.0.0.8：\n%s", proxyText)
 	}
 
@@ -835,12 +839,12 @@ func TestWebSafeReportText(t *testing.T) {
 	fe := healthy()
 	fe.Sites = append(fe.Sites, Site{Name: "erp.internal", Probe: Probe{Target: "https://erp.example.com", Err: ErrTimeout}})
 	repSite := decide(fe, Config{})
-	siteText := webSafeReportText(repSite, fe.Local.OS, now)
+	siteText := webSafeReportText(repSite, fe, now)
 	if strings.Contains(siteText, "erp.internal") {
 		t.Errorf("網站名稱為內部主機名稱時，安全摘要不得含 erp.internal：\n%s", siteText)
 	}
-	if !strings.Contains(siteText, "（已隱藏）") {
-		t.Errorf("網站名稱為內部主機名稱時，安全摘要應含「（已隱藏）」：\n%s", siteText)
+	if !strings.Contains(siteText, "「自訂網站 1」") {
+		t.Errorf("設定檔自訂的網站在安全摘要中應改為「自訂網站 1」：\n%s", siteText)
 	}
 	if full := webReportText(repSite, fe, now); !strings.Contains(full, "erp.internal") {
 		t.Errorf("完整回報仍應含網站名稱 erp.internal：\n%s", full)
@@ -850,12 +854,12 @@ func TestWebSafeReportText(t *testing.T) {
 	fc := healthy()
 	fc.Sites = append(fc.Sites, Site{Name: "公司 ERP", Probe: Probe{Target: "https://erp.example.com", Err: ErrTimeout}})
 	repContact := decide(fc, Config{Org: "範例公司", Contact: map[string]string{"default": "IT 服務台"}})
-	contactText := webSafeReportText(repContact, fc.Local.OS, now)
+	contactText := webSafeReportText(repContact, fc, now)
 	if !strings.Contains(contactText, "聯絡（範例公司）：IT 服務台\n") {
 		t.Errorf("有聯絡窗口的摘要應含「聯絡（範例公司）：IT 服務台」：\n%s", contactText)
 	}
 	repNoOrg := decide(fc, Config{Contact: map[string]string{"default": "IT 服務台"}})
-	noOrgText := webSafeReportText(repNoOrg, fc.Local.OS, now)
+	noOrgText := webSafeReportText(repNoOrg, fc, now)
 	if !strings.Contains(noOrgText, "聯絡：IT 服務台\n") {
 		t.Errorf("沒有 Org 的摘要應為「聯絡：IT 服務台」：\n%s", noOrgText)
 	}
