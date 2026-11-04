@@ -560,7 +560,11 @@ func lightOrg(f Facts, prev Light, orgOK, internetOK bool) Light {
 	case n == 0:
 		l.Status, l.Summary = Yellow, "這台電腦無法執行設定的檢查"
 	case ok == n && orgOK:
-		l.Status, l.Summary = Green, fmt.Sprintf("%d 個節點都有回應", n)
+		s := "節點有回應"
+		if n != 1 {
+			s = fmt.Sprintf("%d 個節點都有回應", n)
+		}
+		l.Status, l.Summary = Green, s
 	case ok > 0:
 		l.Status = Yellow
 		l.Summary = fmt.Sprintf("%d/%d 個節點有回應，「%s」沒有回應", ok, n, strings.Join(names, "、"))

@@ -15,6 +15,8 @@
 		"網站連線": ["sites", "captive"]
 	};
 	var DEFAULT_NAMES = ["本機網路", "路由器", "對外連線", "網址查詢", "網站連線"];
+	// 伺服器提供的燈名（api/layout 回應通過格式檢查時更新），每次檢查開始時恢復
+	var layoutNames = DEFAULT_NAMES;
 
 	var runBtn = document.getElementById("run");
 	var copyBtn = document.getElementById("copy");
@@ -62,6 +64,19 @@
 			lightsEl.appendChild(li);
 			lights.push({ name: names[i], mark: mark, status: status, summary: summary });
 		}
+	}
+
+	// rowsMatch：目前各列的數量與名稱依序都等於 names 時回傳 true
+	function rowsMatch(names) {
+		if (lights.length !== names.length) {
+			return false;
+		}
+		for (var i = 0; i < names.length; i++) {
+			if (lights[i].name !== names[i]) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	// 頁面識別：每次載入重新產生，用於心跳與關閉通知的亂序防護
@@ -148,17 +163,11 @@
 		var result = data && data.result ? data.result : {};
 		var lightsData = result.lights || [];
 		// 回報的燈號與目前各列不同時，先以回報的名稱重建，避免錯位
-		var same = lightsData.length === lights.length;
-		for (var i = 0; same && i < lightsData.length; i++) {
-			if ((lightsData[i] || {}).name !== lights[i].name) {
-				same = false;
-			}
+		var names = [];
+		for (var j = 0; j < lightsData.length; j++) {
+			names.push((lightsData[j] || {}).name || "");
 		}
-		if (!same) {
-			var names = [];
-			for (var j = 0; j < lightsData.length; j++) {
-				names.push((lightsData[j] || {}).name || "");
-			}
+		if (!rowsMatch(names)) {
 			buildRows(names);
 		}
 		for (var i = 0; i < lights.length; i++) {
@@ -281,6 +290,10 @@
 		}
 		running = true;
 		setButtons();
+		// 每次檢查開始時恢復設定中的燈號列（結果重建成其他數量時回到 layout 的版本）
+		if (!rowsMatch(layoutNames)) {
+			buildRows(layoutNames);
+		}
 		setChecking();
 		verdictText.textContent = "檢查中，約 10 秒…";
 		verdictAction.textContent = "";
@@ -406,6 +419,8 @@
 		if (!Array.isArray(names) || names.length === 0 || !names.every(function (n) { return typeof n === "string"; })) {
 			return;
 		}
+		// 記住伺服器提供的燈名，每次檢查開始時恢復
+		layoutNames = names;
 		if (!running && !hasResult) {
 			buildRows(names);
 		}

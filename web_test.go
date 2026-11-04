@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -115,56 +116,67 @@ func TestWebStaticFiles(t *testing.T) {
 }
 
 func TestWebLayout(t *testing.T) {
-	h := newWebHandler(Config{}, testToken, testHost, newTestState(), func() {})
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, webReq(http.MethodGet, "/t/"+testToken+"/api/layout"))
-	if w.Code != http.StatusOK {
-		t.Fatalf("api/layout 應 200，得到 %d：%s", w.Code, w.Body.String())
-	}
-	checkWebHeaders(t, w.Header())
-	if ct := w.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
-		t.Errorf("Content-Type = %q，應含 application/json", ct)
-	}
-	var got struct {
-		Lights []string `json:"lights"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-		t.Fatalf("解析 JSON 失敗：%v", err)
-	}
-	if len(got.Lights) != 5 {
-		t.Errorf("沒有檢查點時 lights = %v，應為 5 盞", got.Lights)
-	}
-
-	cfg := Config{Checkpoints: []Checkpoint{{Name: "單位防火牆", Host: "10.1.0.1", Check: "tcp:443"}}}
-	h = newWebHandler(cfg, testToken, testHost, newTestState(), func() {})
-	w = httptest.NewRecorder()
-	h.ServeHTTP(w, webReq(http.MethodGet, "/t/"+testToken+"/api/layout"))
-	if w.Code != http.StatusOK {
-		t.Fatalf("api/layout 應 200，得到 %d：%s", w.Code, w.Body.String())
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-		t.Fatalf("解析 JSON 失敗：%v", err)
-	}
-	if len(got.Lights) != 6 || got.Lights[2] != "單位網路" {
-		t.Errorf("有檢查點時 lights = %v，應為 6 盞且第 3 盞為「單位網路」", got.Lights)
+	for _, tc := range []struct {
+		name string
+		cfg  Config
+	}{
+		{"沒有檢查點", Config{}},
+		{"有一個檢查點", Config{Checkpoints: []Checkpoint{{Name: "單位防火牆", Host: "10.1.0.1", Check: "tcp:443"}}}},
+	} {
+		h := newWebHandler(tc.cfg, testToken, testHost, newTestState(), func() {})
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, webReq(http.MethodGet, "/t/"+testToken+"/api/layout"))
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s：api/layout 應 200，得到 %d：%s", tc.name, w.Code, w.Body.String())
+		}
+		checkWebHeaders(t, w.Header())
+		if ct := w.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+			t.Errorf("%s：Content-Type = %q，應含 application/json", tc.name, ct)
+		}
+		var got struct {
+			Lights []string `json:"lights"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+			t.Fatalf("%s：解析 JSON 失敗：%v", tc.name, err)
+		}
+		if want := lightNames(tc.cfg); !slices.Equal(got.Lights, want) {
+			t.Errorf("%s：lights = %v，應與 lightNames(cfg) 逐項相等：%v", tc.name, got.Lights, want)
+		}
 	}
 }
 
-// TestWebAppLightNeeds：app.js 的燈號—stage 對應涵蓋設定中的每個燈名
+// TestWebAppLightNeeds：app.js 的燈號—stage 對應與設定的燈名一致
 func TestWebAppLightNeeds(t *testing.T) {
 	b, err := fs.ReadFile(webDir, "app.js")
 	if err != nil {
 		t.Fatalf("讀取 app.js 失敗：%v", err)
 	}
 	js := string(b)
-	cfg := Config{Checkpoints: []Checkpoint{{Name: "單位防火牆", Host: "10.1.0.1", Check: "tcp:443"}}}
-	for _, name := range lightNames(cfg) {
-		if !strings.Contains(js, "\""+name+"\": [") {
-			t.Errorf("app.js 的 LIGHT_NEEDS 缺少 %q 條目", name)
+	// LIGHT_NEEDS 的完整對應字串（逐字，含空白）
+	entries := map[string]string{
+		"本機網路": `"本機網路": ["local"]`,
+		"路由器":  `"路由器": ["gateway"]`,
+		"單位網路": `"單位網路": ["checkpoints"]`,
+		"對外連線": `"對外連線": ["direct"]`,
+		"網址查詢": `"網址查詢": ["dns", "public_dns"]`,
+		"網站連線": `"網站連線": ["sites", "captive"]`,
+	}
+	for name, want := range entries {
+		if !strings.Contains(js, want) {
+			t.Errorf("app.js 缺少 %q 的 LIGHT_NEEDS 條目：%s", name, want)
 		}
 	}
-	if !strings.Contains(js, "api/layout") {
-		t.Error("app.js 應呼叫 api/layout 取得燈名")
+	cfg := Config{Checkpoints: []Checkpoint{{Name: "單位防火牆", Host: "10.1.0.1", Check: "tcp:443"}}}
+	for _, name := range lightNames(cfg) {
+		if _, ok := entries[name]; !ok {
+			t.Errorf("燈名 %q 沒有對應的 LIGHT_NEEDS 條目，新增燈名時 app.js 也要加對應", name)
+		}
+	}
+	if !strings.Contains(js, `fetch("api/layout")`) {
+		t.Error("app.js 應呼叫 fetch(\"api/layout\") 取得燈名")
+	}
+	if !strings.Contains(js, "buildRows(layoutNames)") {
+		t.Error("app.js 的 startRun 應以 buildRows(layoutNames) 恢復設定的燈號列")
 	}
 	if strings.Contains(js, "STAGE_LIGHTS") {
 		t.Error("app.js 不應再使用 STAGE_LIGHTS")

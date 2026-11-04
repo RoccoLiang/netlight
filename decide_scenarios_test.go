@@ -600,6 +600,21 @@ func TestDecideScenarios(t *testing.T) {
 			},
 		},
 		{
+			name: "只有一個節點且正常",
+			id:   "T14",
+			mod: func(f *Facts) {
+				f.Checkpoints = []CheckpointResult{
+					{Name: "單位防火牆", Host: "10.1.0.1", Check: "tcp:443", OK: true, Ms: 12},
+				}
+			},
+			code: OK,
+			check: func(t *testing.T, r Report) {
+				if r.Lights[2].Summary != "節點有回應" {
+					t.Errorf("單位網路摘要 = %q，預期「節點有回應」", r.Lights[2].Summary)
+				}
+			},
+		},
+		{
 			name: "ping 無法執行",
 			id:   "T14",
 			mod: func(f *Facts) {
