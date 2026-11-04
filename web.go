@@ -412,17 +412,19 @@ func webReportText(rep Report, f Facts, now time.Time) string {
 	return b.String()
 }
 
-// safeLabelRe：看起來像位址的片段（IPv4、含 :// 的網址、含冒號的 IPv6 片段、帶點的主機名稱）。
-// 網址的比對到下一個空白或全形標點（含「」）為止。
-var safeLabelRe = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b` +
-	`|[A-Za-z][A-Za-z0-9+.-]*://[^\s「」『』（）〈〉《》【】、。，；：？！…・]+` +
-	`|[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,}` +
-	`|\b[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\b`)
+// safeLabelToken：一段連續的 ASCII 英數與位址常用符號（含底線、埠號、方括號、IPv6、% 介面名稱）
+var safeLabelToken = regexp.MustCompile(`[A-Za-z0-9_.:/@%\[\]-]+`)
 
 // safeLabel：把看起來像位址的文字換成「（已隱藏）」，一般名稱原樣保留。
-// 只用於設定檔可能填入位址的欄位（網站名稱）；程式固定文字與聯絡資訊不套用。
+// 規則刻意保守：任何一段 ASCII 字元只要含 . : / @ 其中之一就整段隱藏（例如「系統 1.2」也會被隱藏），寧可多遮也不漏遮。
+// 只用於設定檔可能填入位址的欄位（SITE 結論中的網站名稱）；程式固定文字與聯絡資訊不套用。
 func safeLabel(s string) string {
-	return safeLabelRe.ReplaceAllString(s, "（已隱藏）")
+	return safeLabelToken.ReplaceAllStringFunc(s, func(tok string) string {
+		if strings.ContainsAny(tok, ".:/@") {
+			return "（已隱藏）"
+		}
+		return tok
+	})
 }
 
 // webSafeReportText：可放心貼到群組的回報摘要（不含燈號說明、技術證據、IP 與網址）

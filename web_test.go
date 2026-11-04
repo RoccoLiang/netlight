@@ -746,10 +746,40 @@ func TestSafeLabel(t *testing.T) {
 		{"https://erp.example.com/a", "（已隱藏）"},
 		{"fe80::1", "（已隱藏）"},
 		{"「erp.internal」本身異常", "「（已隱藏）」本身異常"},
+		{"erp_server.internal", "（已隱藏）"},
+		{"erp_server.corp.internal", "（已隱藏）"},
+		{"10.1.2.3:8080", "（已隱藏）"},
+		{"http://host/path", "（已隱藏）"},
+		{"2001:db8::1234", "（已隱藏）"},
+		{"[fe80::1%en0]:8080", "（已隱藏）"},
+		{"admin@erp", "（已隱藏）"},
+		{"財務系統（正式）", "財務系統（正式）"},
+		{"ERP_2026", "ERP_2026"},
+		{"系統 1.2", "系統 （已隱藏）"}, // 刻意保守：版本號也會被隱藏
 	}
 	for _, tc := range cases {
 		if got := safeLabel(tc.in); got != tc.want {
 			t.Errorf("safeLabel(%q) = %q，應為 %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestWebAppSafeCopyWiring：資料指派與按鈕綁定沒有對調（摘要按鈕必須複製安全摘要）
+func TestWebAppSafeCopyWiring(t *testing.T) {
+	b, err := fs.ReadFile(webDir, "app.js")
+	if err != nil {
+		t.Fatalf("讀取 app.js 失敗：%v", err)
+	}
+	js := string(b)
+	for _, want := range []string{
+		`safeText = data && data.safe_text ? data.safe_text : "";`,
+		`reportText = data && data.text ? data.text : "";`,
+		`copyBtn.addEventListener("click", copyReport);`,
+		`copyFullBtn.addEventListener("click", copyFullReport);`,
+		`copyFullBtn = document.getElementById("copy-full")`,
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("app.js 缺少 %q（資料指派或按鈕綁定可能被改動或對調）", want)
 		}
 	}
 }
