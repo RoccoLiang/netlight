@@ -119,6 +119,9 @@ func TestSiteRoute(t *testing.T) {
 			env: map[string]string{"HTTPS_PROXY": "http://127.0.0.1:7999", "NO_PROXY": "*.corp.example"}, want: "direct"},
 		{name: "localhost 直連", px: Proxy{Mode: ProxyEnv}, rawURL: "https://localhost/",
 			env: map[string]string{"HTTPS_PROXY": "http://127.0.0.1:7999"}, want: "direct"},
+		{name: "明確代理位址無法解析", px: Proxy{Mode: ProxyExplicit, Addr: "[::1"}, rawURL: "https://www.google.com", want: ""},
+		{name: "環境變數代理位址無法解析", px: Proxy{Mode: ProxyEnv}, rawURL: "https://www.google.com",
+			env: map[string]string{"HTTPS_PROXY": "http://[::1"}, want: ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -257,12 +257,11 @@ func siteRoute(px Proxy, rawURL string) string {
 	if err != nil {
 		return ""
 	}
-	f := proxyFunc(px)
-	if f == nil {
-		return "direct"
+	u, err := proxyFunc(px)(req)
+	if err != nil {
+		return "" // 代理位址錯誤等：實際請求會失敗，選路未知
 	}
-	u, err := f(req)
-	if err != nil || u == nil {
+	if u == nil {
 		return "direct"
 	}
 	return "proxy"
@@ -764,10 +763,10 @@ func runWithEvents(ctx context.Context, cfg Config, emit func(stage string)) Fac
 	sitesWg := group(stageSites, func() {
 		var swg sync.WaitGroup
 		for i, t := range targets {
-			i, t := i, t
 			swg.Go(func() {
+				route := siteRoute(lo.Proxy, t.URL) // 選路在請求前決定，避免請求期間環境變數變動
 				f.Sites[i] = siteProbe(ctx, cl, t)
-				f.Sites[i].Route = siteRoute(lo.Proxy, t.URL)
+				f.Sites[i].Route = route
 			})
 		}
 		swg.Wait()

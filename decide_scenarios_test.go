@@ -667,6 +667,22 @@ func TestDecideScenarios(t *testing.T) {
 			},
 		},
 		{
+			name: "沒有設定檢查點",
+			id:   "T14",
+			mod:  func(f *Facts) {},
+			code: OK,
+			check: func(t *testing.T, r Report) {
+				if len(r.Lights) != 5 {
+					t.Fatalf("燈數 = %d，預期 5", len(r.Lights))
+				}
+				for i, want := range []string{"本機網路", "路由器", "對外連線", "網址查詢", "網站連線"} {
+					if r.Lights[i].Name != want {
+						t.Errorf("燈 %d 名稱 = %s，預期 %s", i+1, r.Lights[i].Name, want)
+					}
+				}
+			},
+		},
+		{
 			name: "代理例外的網站直連成功、DNS 全部失敗",
 			id:   "T19",
 			mod: func(f *Facts) {
@@ -828,6 +844,65 @@ func TestDecideScenarios(t *testing.T) {
 				}
 				if strings.Contains(r.Lights[2].Summary, "經由代理") {
 					t.Errorf("對外連線摘要不應含「經由代理」：%q", r.Lights[2].Summary)
+				}
+			},
+		},
+		{
+			name: "混合選路且全部失敗",
+			id:   "T19",
+			mod: func(f *Facts) {
+				f.Local.Proxy = Proxy{Mode: ProxyExplicit, Addr: "10.0.0.8:3128", Bypass: []string{"*"}}
+				f.Direct = failAll(f.Direct, ErrTimeout)
+				f.PublicDNS = failAll(f.PublicDNS, ErrTimeout)
+				f.Sites = failSites(f.Sites, ErrTimeout)
+				for i := range f.Sites {
+					f.Sites[i].Route = "direct"
+				}
+				f.Sites[0].Route = "proxy"
+			},
+			code: ProxyCode,
+		},
+		{
+			name: "網站回應 401",
+			id:   "T19",
+			mod: func(f *Facts) {
+				f.Sites[0].Status = 401
+			},
+			code: OK,
+			check: func(t *testing.T, r Report) {
+				if ev := strings.Join(r.Lights[4].Evidence, "\n"); !strings.Contains(ev, "可能需要登入或權限") {
+					t.Errorf("證據行應含「可能需要登入或權限」：%q", ev)
+				}
+			},
+		},
+		{
+			name: "一個逾時、一個 403",
+			id:   "T19",
+			mod: func(f *Facts) {
+				f.Sites[0].Probe = Probe{Target: f.Sites[0].Target, Err: ErrTimeout}
+				f.Sites[1].Status = 403
+			},
+			code: SiteCode,
+			check: func(t *testing.T, r Report) {
+				if r.Lights[4].Status != Yellow {
+					t.Errorf("網站連線燈 = %v，預期黃燈", r.Lights[4].Status)
+				}
+				if !strings.Contains(r.Lights[4].Summary, "異常") || !strings.Contains(r.Lights[4].Summary, "連得上但拒絕或限制這次請求") {
+					t.Errorf("摘要應同時含「異常」與「連得上但拒絕或限制這次請求」：%q", r.Lights[4].Summary)
+				}
+			},
+		},
+		{
+			name: "兩個網站分別 403、429",
+			id:   "T19",
+			mod: func(f *Facts) {
+				f.Sites[0].Status = 403
+				f.Sites[1].Status = 429
+			},
+			code: OK,
+			check: func(t *testing.T, r Report) {
+				if !strings.Contains(r.Lights[4].Summary, "「Google、Cloudflare」連得上但拒絕或限制這次請求") {
+					t.Errorf("摘要應以「、」連接兩個名稱：%q", r.Lights[4].Summary)
 				}
 			},
 		},

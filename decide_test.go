@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -465,5 +466,22 @@ func TestSiteRouteOf(t *testing.T) {
 		if got := siteRouteOf(Site{}, c.mode); got != c.want {
 			t.Errorf("缺漏時 mode=%v 應推定為 %q，得到 %q", c.mode, c.want, got)
 		}
+	}
+}
+
+func TestSiteRouteJSON(t *testing.T) {
+	b, err := json.Marshal(Site{Route: "proxy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"route":"proxy"`) {
+		t.Errorf("JSON 應含 route 欄位：%s", b)
+	}
+	b, err = json.Marshal(Site{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "route") {
+		t.Errorf("空值時 JSON 不應含 route 欄位：%s", b)
 	}
 }
