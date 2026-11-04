@@ -233,7 +233,7 @@ var verdicts = map[Code]verdictRow{
 	ProxyPACCode: {Text: "這台電腦使用「自動代理設定（PAC）」，直接連線也不通，無法確定是代理還是線路的問題。", Action: "公司電腦請聯絡 IT；家用電腦請在電腦的網路設定中關閉「自動代理設定」再執行一次，仍不通請聯絡網路業者。", Sites: "直接連線也連不上"},
 	ISP:          {Text: "路由器正常，但從路由器出去的線路不通。", Action: "將數據機拔電 30 秒再插回；仍不行請聯絡網路業者（如中華電信）報修。"},
 	RouterOrISP:  {Text: "問題在路由器或電信線路。", Action: "將路由器和數據機拔電 30 秒再插回；仍不行請聯絡網路業者（如中華電信）。"},
-	OrgNetwork:   {Text: "單位設定的網路節點都沒有回應，問題可能在路由器、單位內部網路或出口設備。", Action: "請聯絡單位資訊人員，並提供這個畫面或「複製回報」的內容。"},
+	OrgNetwork:   {Text: "單位設定的網路節點都沒有回應，問題可能在路由器、單位內部網路或出口設備。", Action: "請聯絡單位資訊人員，並提供這個畫面的內容。"},
 	DNSCode:      {Text: "線路是通的，但「查網址」的服務（DNS）故障。", Action: "重開路由器；仍不行請聯絡網路業者（如中華電信）。"},
 	TLSIntercept: {Text: "加密連線被攔截，常見原因是防毒軟體或公司資安設備。", Action: "暫時關閉防毒軟體的「HTTPS 掃描」再試；公司電腦請聯絡 IT。", Sites: "加密連線被攔截"},
 	Filtered:     {Text: "網路是通的，但網站連線被擋住。", Action: "這個網路可能有過濾或防火牆，請聯絡網路管理者（公司 IT 或場地人員）。"},
@@ -245,7 +245,7 @@ var verdicts = map[Code]verdictRow{
 	dnsRouter:    {As: DNSCode, Text: "路由器負責的查網址功能（DNS）沒有正常回應，可能是路由器或電信業者的 DNS 故障。", Action: "將路由器拔電 30 秒再插回；仍不行請聯絡網路業者（如中華電信）。"},
 	dnsManual:    {As: DNSCode, Text: "這台電腦設定的公共 DNS（例如 8.8.8.8）在這個網路查不到網址。", Action: "如果是自己手動設定的，請到網路設定把 DNS 改回「自動取得」再試；公司電腦請聯絡 IT。"},
 	ispHotspot:   {As: ISP, Text: "手機熱點有連上，但手機本身沒有網路。", Action: "確認手機的行動數據已開啟、有訊號且流量沒有用完；或改用其他網路。"},
-	ispOrg:       {As: ISP, Text: "單位網路節點正常，但從單位往外的線路不通。", Action: "請聯絡單位資訊人員；單位的對外線路通常由資訊人員向電信業者或 GSN 報修。"},
+	ispOrg:       {As: ISP, Text: "單位網路有節點回應，但從單位往外的線路不通。", Action: "請聯絡單位資訊人員；單位的對外線路通常由資訊人員向電信業者或 GSN 報修。"},
 	noGateway:    {As: NoDHCP, Text: "電腦有位址，但找不到路由器（沒有預設閘道）。", Action: "將路由器拔電 30 秒再插回，等 2 分鐘後再執行一次；如果這台電腦的 IP 是手動設定的，請確認有填寫「路由器」（預設閘道）。"},
 }
 
@@ -439,7 +439,7 @@ func decide(f Facts, cfg Config) Report {
 	L = append(L, l0, lightGateway(f, l0, internetOK, noRouter))
 	prev := L[len(L)-1]
 	if len(f.Checkpoints) > 0 {
-		l := lightOrg(f, prev, orgOK)
+		l := lightOrg(f, prev, orgOK, internetOK)
 		L = append(L, l)
 		prev = l
 	}
@@ -527,7 +527,7 @@ func lightGateway(f Facts, prev Light, internetOK, noRouter bool) Light {
 }
 
 // lightOrg：「單位網路」燈，只在設定檔有檢查點時出現
-func lightOrg(f Facts, prev Light, orgOK bool) Light {
+func lightOrg(f Facts, prev Light, orgOK, internetOK bool) Light {
 	l := Light{Name: "單位網路"}
 	var names []string
 	ok, n := 0, 0
@@ -555,6 +555,8 @@ func lightOrg(f Facts, prev Light, orgOK bool) Light {
 	case ok > 0:
 		l.Status = Yellow
 		l.Summary = fmt.Sprintf("%d/%d 個節點有回應，「%s」沒有回應", ok, n, strings.Join(names, "、"))
+	case ok == 0 && internetOK:
+		l.Status, l.Summary = Yellow, "單位網路節點都沒有回應，但可以連到網際網路"
 	default:
 		l.Status, l.Summary = Red, "單位網路節點都沒有回應"
 	}

@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 const configName = "netlight.json"
@@ -49,7 +50,7 @@ func validateCheckpoints(cps []Checkpoint) error {
 		if strings.TrimSpace(cp.Name) == "" {
 			return fmt.Errorf("設定檔第 %d 個檢查點的 name 不可為空", n)
 		}
-		if cp.Host == "" || strings.ContainsAny(cp.Host, " /") {
+		if cp.Host == "" || strings.ContainsRune(cp.Host, '/') || strings.ContainsFunc(cp.Host, unicode.IsSpace) {
 			return fmt.Errorf("設定檔第 %d 個檢查點的 host 必須是 IP 或主機名稱（不可含空白或斜線）", n)
 		}
 		switch {

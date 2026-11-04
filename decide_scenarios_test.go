@@ -554,8 +554,29 @@ func TestDecideScenarios(t *testing.T) {
 			},
 			code: ISP,
 			check: func(t *testing.T, r Report) {
-				if !strings.Contains(r.Verdict.Text, "單位網路節點正常") {
-					t.Errorf("結論文字應含「單位網路節點正常」：%q", r.Verdict.Text)
+				if !strings.Contains(r.Verdict.Text, "單位網路有節點回應") {
+					t.Errorf("結論文字應含「單位網路有節點回應」：%q", r.Verdict.Text)
+				}
+			},
+		},
+		{
+			name: "單位節點全掛、網路正常",
+			id:   "T14",
+			mod: func(f *Facts) {
+				f.Checkpoints = []CheckpointResult{
+					{Name: "單位防火牆", Host: "10.1.0.1", Check: "tcp:443", Err: ErrTimeout},
+					{Name: "GSN DNS", Host: "210.69.1.1", Check: "dns", Err: ErrTimeout},
+				}
+			},
+			code: OK,
+			check: func(t *testing.T, r Report) {
+				if r.Lights[2].Status != Yellow {
+					t.Errorf("單位網路燈 = %v，預期黃燈", r.Lights[2].Status)
+				}
+				for _, i := range []int{3, 4, 5} {
+					if r.Lights[i].Status == Skip {
+						t.Errorf("燈 %d 不應為略過（%s）", i+1, r.Lights[i].Summary)
+					}
 				}
 			},
 		},

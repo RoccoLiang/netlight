@@ -191,6 +191,8 @@ func TestLoadConfigCheckpoints(t *testing.T) {
 		{"埠號超過 65535", `{"checkpoints": [{"name": "x", "host": "10.1.0.1", "check": "tcp:70000"}]}`},
 		{"name 是空白", `{"checkpoints": [{"name": "  ", "host": "10.1.0.1", "check": "ping"}]}`},
 		{"host 含空白", `{"checkpoints": [{"name": "x", "host": "10.1 0.1", "check": "ping"}]}`},
+		{"host 結尾有 tab", "{\"checkpoints\": [{\"name\": \"x\", \"host\": \"10.1.0.1\\t\", \"check\": \"ping\"}]}"},
+		{"host 結尾有全形空白", "{\"checkpoints\": [{\"name\": \"x\", \"host\": \"10.1.0.1　\", \"check\": \"ping\"}]}"},
 		{"超過 10 個", `{"checkpoints": [
 			{"name": "1", "host": "10.1.0.1", "check": "ping"},
 			{"name": "2", "host": "10.1.0.2", "check": "ping"},
