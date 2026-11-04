@@ -906,6 +906,146 @@ func TestDecideScenarios(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "一個網站查不到網址、其他正常",
+			id:   "T20",
+			mod: func(f *Facts) {
+				f.DNS[0] = Probe{Target: "www.google.com", Err: ErrDNS}
+				f.Sites[0].Probe = Probe{Target: f.Sites[0].Target, Err: ErrDNS}
+			},
+			code: SiteCode,
+			check: func(t *testing.T, r Report) {
+				if !strings.Contains(r.Verdict.Text, "查不到") || !strings.Contains(r.Verdict.Text, "Google") {
+					t.Errorf("結論文字應說查不到網址並列出網站名稱：%q", r.Verdict.Text)
+				}
+				if strings.Contains(r.Verdict.Text, "本身異常") {
+					t.Errorf("結論不應說成網站本身異常：%q", r.Verdict.Text)
+				}
+				if r.Lights[3].Status != Yellow || !strings.Contains(r.Lights[3].Summary, "www.google.com") {
+					t.Errorf("網址查詢燈 = %v（%s），預期黃燈且摘要含主機名稱", r.Lights[3].Status, r.Lights[3].Summary)
+				}
+			},
+		},
+		{
+			name: "網址查詢逾時、其他正常",
+			id:   "T20",
+			mod: func(f *Facts) {
+				f.DNS[0] = Probe{Target: "www.google.com", Err: ErrTimeout}
+				f.Sites[0].Probe = Probe{Target: f.Sites[0].Target, Err: ErrTimeout}
+			},
+			code: SiteCode,
+			check: func(t *testing.T, r Report) {
+				if !strings.Contains(r.Verdict.Text, "查不到") {
+					t.Errorf("DNS 查詢逾時仍應套用查不到網址的說法：%q", r.Verdict.Text)
+				}
+			},
+		},
+		{
+			name: "一個網站查不到網址、另一個網站本身逾時",
+			id:   "T20",
+			mod: func(f *Facts) {
+				f.DNS[0] = Probe{Target: "www.google.com", Err: ErrDNS}
+				f.Sites[0].Probe = Probe{Target: f.Sites[0].Target, Err: ErrDNS}
+				f.Sites[1].Probe = Probe{Target: f.Sites[1].Target, Err: ErrTimeout}
+			},
+			code: SiteCode,
+			check: func(t *testing.T, r Report) {
+				if !strings.Contains(r.Verdict.Text, "本身異常") {
+					t.Errorf("混有非 DNS 因素時應維持既有 SITE 說法：%q", r.Verdict.Text)
+				}
+			},
+		},
+		{
+			name: "部分查詢回應網址不存在",
+			id:   "T20",
+			mod: func(f *Facts) {
+				f.DNS[0] = Probe{Target: "www.google.com", Err: ErrNotFound}
+			},
+			code: OK,
+			check: func(t *testing.T, r Report) {
+				if r.Lights[3].Status != Green {
+					t.Errorf("網址查詢燈 = %v（%s），預期綠燈", r.Lights[3].Status, r.Lights[3].Summary)
+				}
+			},
+		},
+		{
+			name: "只測自訂網站、沒有確認網際網路",
+			id:   "T20",
+			cfg:  Config{ReplaceDefaultTargets: true},
+			mod: func(f *Facts) {
+				f.Direct = failAll(f.Direct, ErrTimeout)
+				f.PublicDNS = failAll(f.PublicDNS, ErrTimeout)
+				f.DNS = []Probe{{Target: "erp.example.com", OK: true}}
+				f.Sites = []Site{{Name: "公司 ERP", Probe: Probe{Target: "https://erp.example.com", OK: true}, Status: 200}}
+			},
+			code: OK,
+			check: func(t *testing.T, r Report) {
+				if r.Verdict.Text != "測試的網站都連得上，但這次沒有確認網際網路。" {
+					t.Errorf("結論文字 = %q，預期說明這次沒有確認網際網路", r.Verdict.Text)
+				}
+			},
+		},
+		{
+			name: "單位節點都沒有回應但可上網",
+			id:   "T20",
+			cfg:  Config{Org: "範例機關", Contact: map[string]string{"org_network": "資訊室 分機 100"}},
+			mod: func(f *Facts) {
+				f.Checkpoints = []CheckpointResult{
+					{Name: "單位防火牆", Host: "10.1.0.1", Check: "tcp:443", Err: ErrTimeout},
+					{Name: "GSN DNS", Host: "210.69.1.1", Check: "dns", Err: ErrTimeout},
+				}
+			},
+			code: OK,
+			check: func(t *testing.T, r Report) {
+				if r.Verdict.Text != "可以連到網際網路，但單位網路的節點都沒有回應。" {
+					t.Errorf("結論文字 = %q，預期 okOrgDown 的說法", r.Verdict.Text)
+				}
+				if r.Verdict.Contact != "資訊室 分機 100" {
+					t.Errorf("窗口 = %q，預期資訊室 分機 100", r.Verdict.Contact)
+				}
+				if r.Verdict.Org != "範例機關" {
+					t.Errorf("單位 = %q，預期範例機關", r.Verdict.Org)
+				}
+				if got := r.Verdict.Code.ExitCode(); got != 0 {
+					t.Errorf("結束碼 = %d，預期 0", got)
+				}
+			},
+		},
+		{
+			name: "部分單位節點沒有回應",
+			id:   "T20",
+			mod: func(f *Facts) {
+				f.Checkpoints = []CheckpointResult{
+					{Name: "單位防火牆", Host: "10.1.0.1", Check: "tcp:443", OK: true, Ms: 8},
+					{Name: "GSN DNS", Host: "210.69.1.1", Check: "dns", Err: ErrTimeout},
+				}
+			},
+			code: OK,
+			check: func(t *testing.T, r Report) {
+				if r.Verdict.Text != "網路正常，但部分單位網路節點沒有回應。" {
+					t.Errorf("結論文字 = %q，預期 okOrgPartial 的說法", r.Verdict.Text)
+				}
+			},
+		},
+		{
+			name: "單位節點都正常",
+			id:   "T20",
+			mod: func(f *Facts) {
+				f.Checkpoints = []CheckpointResult{
+					{Name: "單位防火牆", Host: "10.1.0.1", Check: "tcp:443", OK: true, Ms: 12},
+					{Name: "GSN DNS", Host: "210.69.1.1", Check: "dns", OK: true, Ms: 20},
+				}
+			},
+			code: OK,
+			check: func(t *testing.T, r Report) {
+				if r.Verdict.Text != "網路正常。" {
+					t.Errorf("結論文字 = %q，預期「網路正常。」", r.Verdict.Text)
+				}
+				if r.Verdict.Contact != "" {
+					t.Errorf("單位節點正常時不應顯示窗口：%q", r.Verdict.Contact)
+				}
+			},
+		},
 	}
 
 	for _, c := range cases {

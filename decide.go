@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"net"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -230,13 +231,17 @@ type verdictRow struct {
 
 // 內部變體鍵：同一結論碼在特定情境下的說法
 const (
-	dnsVPN      Code = "DNS_VPN"
-	dnsNoServer Code = "DNS_NO_SERVER"
-	dnsRouter   Code = "DNS_ROUTER"
-	dnsManual   Code = "DNS_MANUAL"
-	ispHotspot  Code = "ISP_HOTSPOT"
-	ispOrg      Code = "ISP_ORG"
-	noGateway   Code = "NO_GATEWAY"
+	dnsVPN       Code = "DNS_VPN"
+	dnsNoServer  Code = "DNS_NO_SERVER"
+	dnsRouter    Code = "DNS_ROUTER"
+	dnsManual    Code = "DNS_MANUAL"
+	ispHotspot   Code = "ISP_HOTSPOT"
+	ispOrg       Code = "ISP_ORG"
+	noGateway    Code = "NO_GATEWAY"
+	siteDNS      Code = "SITE_DNS"
+	okCustomOnly Code = "OK_CUSTOM_ONLY"
+	okOrgDown    Code = "OK_ORG_DOWN"
+	okOrgPartial Code = "OK_ORG_PARTIAL"
 )
 
 // 預設（家用）說法；SITE 的 %s 為失敗網站名稱
@@ -264,6 +269,10 @@ var verdicts = map[Code]verdictRow{
 	dnsManual:    {As: DNSCode, Text: "這台電腦設定的公共 DNS（例如 8.8.8.8）在這個網路查不到網址。", Action: "如果是自己手動設定的，請到網路設定把 DNS 改回「自動取得」再試；公司電腦請聯絡 IT。"},
 	ispHotspot:   {As: ISP, Text: "手機熱點有連上，但手機本身沒有網路。", Action: "確認手機的行動數據已開啟、有訊號且流量沒有用完；或改用其他網路。"},
 	ispOrg:       {As: ISP, Text: "單位網路有節點回應，但從單位往外的線路不通。", Action: "請聯絡單位資訊人員；單位的對外線路通常由資訊人員向電信業者或 GSN 報修。"},
+	siteDNS:      {As: SiteCode, Text: "你的網路正常，但查不到「%s」的網址，所以連不上。", Action: "請稍後再試；如果持續發生，公司或單位的電腦請聯絡 IT，家用電腦請將路由器拔電 30 秒再插回。"},
+	okCustomOnly: {As: OK, Text: "測試的網站都連得上，但這次沒有確認網際網路。", Action: "如果還需要使用外部網站，請另外確認；有問題請聯絡 IT。"},
+	okOrgDown:    {As: OK, Text: "可以連到網際網路，但單位網路的節點都沒有回應。", Action: "如果你現在應該在單位網路內，請聯絡單位資訊人員；在單位外（例如在家）則屬正常。"},
+	okOrgPartial: {As: OK, Text: "網路正常，但部分單位網路節點沒有回應。", Action: "如果需要使用沒有回應的單位系統，請聯絡單位資訊人員。"},
 	noGateway:    {As: NoDHCP, Text: "電腦有位址，但找不到路由器（沒有預設閘道）。", Action: "將路由器拔電 30 秒再插回，等 2 分鐘後再執行一次；如果這台電腦的 IP 是手動設定的，請確認有填寫「路由器」（預設閘道）。"},
 }
 
@@ -330,6 +339,33 @@ func siteRouteOf(s Site, mode ProxyMode) string {
 		return "pac"
 	}
 	return "direct"
+}
+
+// siteDNSBlamed：每個不健康網站的主機，其系統 DNS 查詢都是失敗（且不是網址不存在）。
+// 一律以主機的系統 DNS 查詢結果為準（逾時會歸類為 ErrTimeout），不以網站本身的錯誤類別判斷；
+// 找不到對應查詢的網站視為不符合。
+func siteDNSBlamed(f Facts, badSites []string) bool {
+	for _, s := range f.Sites {
+		if !slices.Contains(badSites, s.Name) || healthySite(s) {
+			continue
+		}
+		host := ""
+		if u, err := url.Parse(s.Target); err == nil {
+			host = u.Hostname()
+		}
+		if host == "" {
+			return false
+		}
+		// 找該主機的系統 DNS 查詢；全部都失敗（且不是網址不存在）才成立
+		i := slices.IndexFunc(f.DNS, func(p Probe) bool { return p.Target == host })
+		if i < 0 {
+			return false
+		}
+		if p := f.DNS[i]; p.OK || p.Err == ErrNotFound {
+			return false
+		}
+	}
+	return true
 }
 
 // paren：非空字串加上全形括號
@@ -458,8 +494,16 @@ func decide(f Facts, cfg Config) Report {
 		key = ispHotspot
 	case (key == ISP || key == RouterOrISP) && orgAny:
 		key = ispOrg
+	case key == SiteCode && anyReached && len(badSites) > 0 && siteDNSBlamed(f, badSites):
+		key = siteDNS
 	case key == NoDHCP && !f.Local.APIPA:
 		key = noGateway
+	case key == OK && cfg.ReplaceDefaultTargets && !anyDirect && !pubDNSOK:
+		key = okCustomOnly
+	case key == OK && orgConfigured && !orgAny:
+		key = okOrgDown
+	case key == OK && orgConfigured && orgAny && !orgOK:
+		key = okOrgPartial
 	}
 
 	row := verdicts[key]
@@ -470,6 +514,12 @@ func decide(f Facts, cfg Config) Report {
 	}
 	if code != OK {
 		v.Contact = cfg.contactFor(code)
+		if v.Contact != "" {
+			v.Org = cfg.Org
+		}
+	}
+	if key == okOrgDown || key == okOrgPartial {
+		v.Contact = cfg.contactFor(OrgNetwork)
 		if v.Contact != "" {
 			v.Org = cfg.Org
 		}
@@ -740,6 +790,17 @@ func lightDNS(f Facts, prev Light, dnsFail, dnsOK, viaProxy bool) Light {
 	}
 	switch {
 	case !dnsFail && len(f.DNS) > 0:
+		var partial []string
+		for _, p := range f.DNS {
+			if !p.OK && p.Err != ErrNotFound {
+				partial = append(partial, p.Target)
+			}
+		}
+		if len(partial) > 0 {
+			l.Status = Yellow
+			l.Summary = fmt.Sprintf("部分網址查不到：「%s」", strings.Join(partial, "、"))
+			break
+		}
 		l.Status = Green
 		if dnsOK {
 			l.Summary = "正常"
