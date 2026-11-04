@@ -39,7 +39,7 @@
 | macOS | 下載對應晶片的tar.gz（Apple晶片用arm64、Intel用amd64），雙擊解壓縮後，在「終端機」先`cd`進入解壓出的資料夾（例如`cd ~/Downloads/netlight-darwin-arm64`），再執行`./netlight-darwin-arm64 --web`。Intel Mac請把指令中的arm64換成amd64。第一次若被擋，到「系統設定 → 隱私權與安全性」按「仍要打開」。IT派送可用`xattr -d com.apple.quarantine netlight-darwin-arm64`。 |
 | Ubuntu | 下載netlight-linux-amd64.tar.gz，執行`tar xzf netlight-linux-amd64.tar.gz && cd netlight-linux-amd64 && ./netlight-linux-amd64 --web`（沒有桌面環境時去掉`--web`改用文字版）。 |
 
-上表的方法都使用網頁版：按一個按鈕就會檢查，並可一鍵複製回報文字。
+上表的方法都使用網頁版：按一個按鈕就會檢查。「複製回報給IT」複製的是不含這台電腦IP、網址與技術細節的摘要，可以放心貼到群組；需要時，另一個按鈕可複製完整技術資料給協助你的資訊人員。
 
 - **什麼時候開網頁版**：指定`--web`時一定使用網頁版。Windows從檔案總管雙擊、而且沒有帶任何參數時，也會自動開網頁版；從命令列執行、或帶了任何參數（包括`--no-pause`）時，是文字版。
 - **想直接看文字結果**：macOS、Linux把指令中的`--web`去掉；Windows在PowerShell進入資料夾後執行`.\netlight-windows-amd64.exe`。
@@ -96,7 +96,7 @@
 - `targets`：額外要測的網站，必須是`https://`。
 - `replace_default_targets`：設為`true`時，網站連線與其網址查詢只測自訂網站；公共IP、公共DNS與Wi-Fi登入頁的檢查仍會照常進行。
 - `show_public_ip`：是否在技術細節顯示對外IP（預設true；設為false時不會查詢）。
-- `checkpoints`：單位網路的檢查點，每個包含`name`、`host`、`check`（`ping`、`dns`、`tcp:<埠>`），最多10個。
+- `checkpoints`：單位網路的檢查點，每個包含`name`、`host`、`check`（`ping`、`dns`、`tcp:<埠>`），最多10個。可加上`"required": false`標成參考節點：可以上網時，參考節點沒有回應只在燈號註明「（參考）」，不影響結論；沒有寫`required`時視為必要節點。
 
 ### 政府機關（GSN）範例
 
@@ -142,7 +142,7 @@ netlight沒有遙測，不會把診斷結果回傳給開發者或任何第三方
 | `--plain` | 不用emoji與顏色，也不顯示路線圖，改為逐行列出各盞燈 |
 | `--no-pause` | Windows雙擊執行時，結束不等待按鍵（帶了這個參數就不會自動開網頁版） |
 | `--config PATH` | 指定設定檔 |
-| `--web` | 在瀏覽器開啟本機網頁版，按鈕操作、可複製回報文字 |
+| `--web` | 在瀏覽器開啟本機網頁版，按鈕操作、可複製回報摘要或完整技術資料 |
 | `--version` | 顯示版本 |
 
 `--detail`、`--json`、`--plain`不適用於網頁版：指定`--web`時會忽略它們。
