@@ -69,9 +69,10 @@ type webStageEvent struct {
 
 // webRunResult：POST /api/run 串流回應的最後一行（report 事件）
 type webRunResult struct {
-	Type   string     `json:"type"`
-	Result jsonReport `json:"result"`
-	Text   string     `json:"text"`
+	Type     string     `json:"type"`
+	Result   jsonReport `json:"result"`
+	Text     string     `json:"text"`
+	SafeText string     `json:"safe_text"`
 }
 
 // webState：handler 與 webMain 共用的狀態（handler 內不啟動任何 goroutine 或計時器）
@@ -364,9 +365,10 @@ func newWebHandler(cfg Config, token, host string, st *webState, done func()) ht
 			now := time.Now()
 			if streamErr == nil {
 				streamErr = enc.Encode(webRunResult{
-					Type:   "report",
-					Result: jsonReport{version, now.Format(time.RFC3339), f.Local.OS, rep, f},
-					Text:   webReportText(rep, f, now),
+					Type:     "report",
+					Result:   jsonReport{version, now.Format(time.RFC3339), f.Local.OS, rep, f},
+					Text:     webReportText(rep, f, now),
+					SafeText: webSafeReportText(rep, f.Local.OS, now),
 				})
 				if streamErr == nil && flusher != nil {
 					flusher.Flush()
@@ -406,5 +408,31 @@ func webReportText(rep Report, f Facts, now time.Time) string {
 	fmt.Fprintf(&b, "版本：netlight v%s · %s\n", version, f.Local.OS)
 	fmt.Fprintf(&b, "結論碼：%s\n", rep.Verdict.Code)
 	render(&b, rep, f.Local.OS, now, renderMode{Detail: true})
+	return b.String()
+}
+
+// webSafeReportText：可放心貼到群組的回報摘要（不含燈號說明、技術證據、IP 與網址）
+func webSafeReportText(rep Report, osName string, now time.Time) string {
+	now = now.In(webTPE)
+	var b strings.Builder
+	fmt.Fprintln(&b, "【netlight 網路診斷摘要】")
+	fmt.Fprintf(&b, "時間：%s 台灣標準時間\n", now.Format("2006-01-02 15:04"))
+	fmt.Fprintf(&b, "版本：netlight v%s · %s\n", version, osName)
+	fmt.Fprintf(&b, "結論碼：%s\n", rep.Verdict.Code)
+	rows := make([]string, len(rep.Lights))
+	for i, l := range rep.Lights {
+		rows[i] = l.Name + " " + statusWord[l.Status]
+	}
+	fmt.Fprintf(&b, "燈號：%s\n", strings.Join(rows, "｜"))
+	fmt.Fprintf(&b, "結論：%s\n", rep.Verdict.Text)
+	fmt.Fprintf(&b, "建議：%s\n", rep.Verdict.Action)
+	if rep.Verdict.Contact != "" {
+		if rep.Verdict.Org != "" {
+			fmt.Fprintf(&b, "聯絡（%s）：%s\n", rep.Verdict.Org, rep.Verdict.Contact)
+		} else {
+			fmt.Fprintf(&b, "聯絡：%s\n", rep.Verdict.Contact)
+		}
+	}
+	fmt.Fprintln(&b, "（這份摘要不含你的 IP、內部網址與技術細節；資訊人員需要時，請另外提供完整技術資料。）")
 	return b.String()
 }

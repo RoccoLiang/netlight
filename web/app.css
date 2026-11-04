@@ -140,6 +140,13 @@ button.primary {
 	font-weight: 700;
 }
 
+/* 按鈕區之後的安全摘要說明（次要文字） */
+.copy-hint {
+	margin: 0 0 1.5rem;
+	color: var(--muted);
+	font-size: 0.95rem;
+}
+
 /* ---- 五盞燈 ---- */
 
 .lights {

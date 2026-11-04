@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -259,9 +260,10 @@ func TestWebRunStream(t *testing.T) {
 		}
 	}
 	var rep struct {
-		Type   string         `json:"type"`
-		Result map[string]any `json:"result"`
-		Text   string         `json:"text"`
+		Type     string         `json:"type"`
+		Result   map[string]any `json:"result"`
+		Text     string         `json:"text"`
+		SafeText string         `json:"safe_text"`
 	}
 	if err := json.Unmarshal([]byte(lines[3]), &rep); err != nil {
 		t.Fatalf("解析最後一行失敗：%v", err)
@@ -275,6 +277,13 @@ func TestWebRunStream(t *testing.T) {
 	}
 	if !strings.Contains(rep.Text, "【netlight 網路診斷回報】") {
 		t.Errorf("report.text 應含「【netlight 網路診斷回報】」：%q", rep.Text)
+	}
+	if !strings.Contains(rep.SafeText, "【netlight 網路診斷摘要】") {
+		t.Errorf("report.safe_text 應含「【netlight 網路診斷摘要】」且非空：%q", rep.SafeText)
+	}
+	// healthy() 的燈號說明含 IP（192.168.1.23 等），安全摘要不得出現任何 IPv4
+	if regexp.MustCompile(`\b(\d{1,3}\.){3}\d{1,3}\b`).MatchString(rep.SafeText) {
+		t.Errorf("report.safe_text 不得含 IPv4：%q", rep.SafeText)
 	}
 }
 
@@ -723,6 +732,88 @@ func TestWebReportText(t *testing.T) {
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("回報文字缺少 %q：\n%s", want, text)
+		}
+	}
+}
+
+func TestWebSafeReportText(t *testing.T) {
+	ipRe := regexp.MustCompile(`\b(\d{1,3}\.){3}\d{1,3}\b`)
+	now := time.Date(2026, 11, 2, 6, 3, 0, 0, time.UTC)
+
+	// healthy()：逐字比對（燈號說明含 IP，安全摘要不得含）
+	f := healthy()
+	rep := decide(f, Config{})
+	text := webSafeReportText(rep, f.Local.OS, now)
+	want := "【netlight 網路診斷摘要】\n" +
+		"時間：2026-11-02 14:03 台灣標準時間\n" +
+		"版本：netlight v" + version + " · macOS\n" +
+		"結論碼：OK\n" +
+		"燈號：本機網路 正常｜路由器 正常｜對外連線 正常｜網址查詢 正常｜網站連線 正常\n" +
+		"結論：網路正常。\n" +
+		"建議：如果某個 App 還是不能用，可能是該服務本身異常，請稍後再試。\n" +
+		"（這份摘要不含你的 IP、內部網址與技術細節；資訊人員需要時，請另外提供完整技術資料。）\n"
+	if text != want {
+		t.Errorf("安全摘要 =\n%s\n應為\n%s", text, want)
+	}
+	if ipRe.MatchString(text) {
+		t.Errorf("安全摘要不得含 IPv4：\n%s", text)
+	}
+	if strings.Contains(text, "http") {
+		t.Errorf("安全摘要不得含網址（http）：\n%s", text)
+	}
+	if strings.Contains(text, "\n      · ") {
+		t.Errorf("安全摘要不得含技術證據前綴：\n%s", text)
+	}
+
+	// 代理情境：完整回報含代理位址，安全摘要不得含
+	fp := healthy()
+	fp.Local.Proxy = Proxy{Mode: ProxyExplicit, Addr: "10.0.0.8:3128"}
+	repProxy := decide(fp, Config{})
+	if full := webReportText(repProxy, fp, now); !strings.Contains(full, "10.0.0.8") {
+		t.Errorf("代理情境的完整回報應含代理位址（證明摘要確實有排除）：\n%s", full)
+	}
+	if proxyText := webSafeReportText(repProxy, fp.Local.OS, now); strings.Contains(proxyText, "10.0.0.8") {
+		t.Errorf("代理情境的安全摘要不得含代理位址 10.0.0.8：\n%s", proxyText)
+	}
+
+	// 有聯絡窗口：Org 非空時列出單位，Org 空時只列聯絡
+	fc := healthy()
+	fc.Sites = append(fc.Sites, Site{Name: "公司 ERP", Probe: Probe{Target: "https://erp.example.com", Err: ErrTimeout}})
+	repContact := decide(fc, Config{Org: "範例公司", Contact: map[string]string{"default": "IT 服務台"}})
+	contactText := webSafeReportText(repContact, fc.Local.OS, now)
+	if !strings.Contains(contactText, "聯絡（範例公司）：IT 服務台\n") {
+		t.Errorf("有聯絡窗口的摘要應含「聯絡（範例公司）：IT 服務台」：\n%s", contactText)
+	}
+	repNoOrg := decide(fc, Config{Contact: map[string]string{"default": "IT 服務台"}})
+	noOrgText := webSafeReportText(repNoOrg, fc.Local.OS, now)
+	if !strings.Contains(noOrgText, "聯絡：IT 服務台\n") {
+		t.Errorf("沒有 Org 的摘要應為「聯絡：IT 服務台」：\n%s", noOrgText)
+	}
+	if strings.Contains(noOrgText, "聯絡（") {
+		t.Errorf("沒有 Org 的摘要不得出現「聯絡（」：\n%s", noOrgText)
+	}
+}
+
+// TestWebAppSafeCopy：前端有兩個複製按鈕，分別複製安全摘要與完整技術資料
+func TestWebAppSafeCopy(t *testing.T) {
+	b, err := fs.ReadFile(webDir, "app.js")
+	if err != nil {
+		t.Fatalf("讀取 app.js 失敗：%v", err)
+	}
+	js := string(b)
+	for _, want := range []string{"data.safe_text", "copy-full", "copyText("} {
+		if !strings.Contains(js, want) {
+			t.Errorf("app.js 缺少 %q", want)
+		}
+	}
+	h, err := fs.ReadFile(webDir, "index.html")
+	if err != nil {
+		t.Fatalf("讀取 index.html 失敗：%v", err)
+	}
+	html := string(h)
+	for _, want := range []string{`id="copy-full"`, "copy-hint"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("index.html 缺少 %q", want)
 		}
 	}
 }

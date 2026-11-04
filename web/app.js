@@ -20,6 +20,7 @@
 
 	var runBtn = document.getElementById("run");
 	var copyBtn = document.getElementById("copy");
+	var copyFullBtn = document.getElementById("copy-full");
 	var byeBtn = document.getElementById("bye");
 	var copyNote = document.getElementById("copy-note");
 	var verdictText = document.getElementById("verdict-text");
@@ -93,6 +94,7 @@
 	var pageId = makePageId();
 
 	var reportText = "";
+	var safeText = "";
 	var running = false;
 	var hasResult = false;
 	var copyTimer = null;
@@ -154,7 +156,8 @@
 	function setButtons() {
 		runBtn.disabled = running;
 		runBtn.textContent = running ? "檢查中…約 10 秒" : (hasResult ? "重新檢查" : "開始檢查");
-		copyBtn.disabled = running || !reportText;
+		copyBtn.disabled = running || !safeText;
+		copyFullBtn.disabled = running || !reportText;
 	}
 
 	function showResult(data) {
@@ -187,6 +190,7 @@
 		}
 		renderEvidence(lightsData);
 		reportText = data && data.text ? data.text : "";
+		safeText = data && data.safe_text ? data.safe_text : "";
 	}
 
 	function renderEvidence(lightsData) {
@@ -218,6 +222,7 @@
 		running = false;
 		hasResult = false;
 		reportText = "";
+		safeText = "";
 		setPending();
 		evidence.textContent = "";
 		verdictText.textContent = message;
@@ -321,9 +326,9 @@
 
 	// ---- 複製回報 ----
 
-	function copyByFallback() {
+	function copyByFallback(text) {
 		var ta = document.createElement("textarea");
-		ta.value = reportText;
+		ta.value = text;
 		ta.setAttribute("readonly", "");
 		ta.className = "offscreen";
 		document.body.appendChild(ta);
@@ -338,8 +343,8 @@
 		return ok;
 	}
 
-	function noteCopied() {
-		copyNote.textContent = "已複製";
+	function noteCopied(message) {
+		copyNote.textContent = message;
 		if (copyTimer) {
 			clearTimeout(copyTimer);
 		}
@@ -348,27 +353,36 @@
 		}, 3000);
 	}
 
-	function copyReport() {
-		if (!reportText) {
+	// copyText：共用複製流程（clipboard 優先，失敗退回 execCommand）
+	function copyText(text, copiedNote) {
+		if (!text) {
 			return;
 		}
 		if (navigator.clipboard && navigator.clipboard.writeText) {
-			navigator.clipboard.writeText(reportText).then(function () {
-				noteCopied();
+			navigator.clipboard.writeText(text).then(function () {
+				noteCopied(copiedNote);
 			}, function () {
-				if (copyByFallback()) {
-					noteCopied();
+				if (copyByFallback(text)) {
+					noteCopied(copiedNote);
 				} else {
 					copyNote.textContent = "複製失敗，請改用「技術細節」手動複製";
 				}
 			});
 			return;
 		}
-		if (copyByFallback()) {
-			noteCopied();
+		if (copyByFallback(text)) {
+			noteCopied(copiedNote);
 		} else {
 			copyNote.textContent = "複製失敗，請改用「技術細節」手動複製";
 		}
+	}
+
+	function copyReport() {
+		copyText(safeText, "已複製摘要");
+	}
+
+	function copyFullReport() {
+		copyText(reportText, "已複製完整技術資料");
 	}
 
 	// ---- 心跳與關閉通知 ----
@@ -405,6 +419,7 @@
 
 	runBtn.addEventListener("click", startRun);
 	copyBtn.addEventListener("click", copyReport);
+	copyFullBtn.addEventListener("click", copyFullReport);
 	byeBtn.addEventListener("click", endProgram);
 
 	// 啟動：先以預設燈名建立各列，再向伺服器取得設定中的燈名（失敗時維持預設，不顯示錯誤）
