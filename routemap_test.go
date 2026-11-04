@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -33,7 +34,7 @@ func TestRenderMapGolden(t *testing.T) {
 	for _, name := range []string{"map_b_dns", "map_c_router", "map_o_org_down"} {
 		r := mapGoldenCase(strings.TrimPrefix(name, "map_"))
 		var b bytes.Buffer
-		renderMap(&b, r.Lights, false)
+		renderMap(&b, r.Lights, false, nil)
 		checkGolden(t, name, b.Bytes())
 
 		lines := splitMapLines(t, b.String())
@@ -86,7 +87,7 @@ func TestRenderMapGolden(t *testing.T) {
 func TestRenderMapAllGreen(t *testing.T) {
 	r := mapGoldenCase("a_ok")
 	var b bytes.Buffer
-	renderMap(&b, r.Lights, false)
+	renderMap(&b, r.Lights, false, nil)
 	out := b.String()
 	if strings.Contains(out, "◀ 斷在這裡") || strings.Contains(out, "┆") {
 		t.Errorf("全部正常時不應有斷點標記或虛線：\n%s", out)
@@ -126,7 +127,7 @@ func TestRenderMapDetail(t *testing.T) {
 		{Name: "對外連線", Status: Skip, Summary: "前一段異常，未檢查", Evidence: []string{"未檢查"}},
 	}
 	var b bytes.Buffer
-	renderMap(&b, lights, true)
+	renderMap(&b, lights, true, nil)
 	want := "  ● 本機網路　🟢 正常  Wi-Fi 192.168.1.23\n" +
 		"  │     · 介面：en0\n" +
 		"  │     · IP：192.168.1.23\n" +
@@ -202,5 +203,197 @@ func TestClearMapFrame(t *testing.T) {
 		if b.String() != c.want {
 			t.Errorf("clearMapFrame(lines=%d) = %q，預期 %q", c.lines, b.String(), c.want)
 		}
+	}
+}
+
+func TestRouteMapLines(t *testing.T) {
+	cases := []struct {
+		name      string
+		f         Facts
+		egressRed bool
+		want      []string
+	}{
+		{
+			name: "Target 為空",
+			f:    Facts{},
+			want: nil,
+		},
+		{
+			name: "無法執行路由追蹤",
+			f:    Facts{Route: RouteResult{Target: "1.1.1.1", Unknown: true}},
+			want: []string{"（這台電腦無法執行路由追蹤）"},
+		},
+		{
+			name: "沒有任何節點回應",
+			f:    Facts{Route: RouteResult{Target: "1.1.1.1"}},
+			want: []string{"（路由追蹤沒有任何節點回應）"},
+		},
+		{
+			name: "正常抵達含 TTL 缺口",
+			f: Facts{
+				Local: Local{Gateway: "192.168.1.1"},
+				Checkpoints: []CheckpointResult{
+					{Name: "單位防火牆", Host: "10.1.0.1"},
+				},
+				Route: RouteResult{
+					Target: "1.1.1.1",
+					Hops: []Hop{
+						{TTL: 1, IP: "192.168.1.1"},
+						{TTL: 2, IP: "198.51.100.1"},
+						{TTL: 4, IP: "203.0.113.9"},
+						{TTL: 5, IP: "1.1.1.1", Reached: true},
+					},
+				},
+			},
+			want: []string{
+				"├ 1. 192.168.1.1（路由器）",
+				"├ 2. 198.51.100.1",
+				"┊",
+				"├ 4. 203.0.113.9",
+				"└ 5. 1.1.1.1（抵達）",
+			},
+		},
+		{
+			name: "檢查點標註",
+			f: Facts{
+				Checkpoints: []CheckpointResult{
+					{Name: "單位防火牆", Host: "10.1.0.1"},
+				},
+				Route: RouteResult{
+					Target: "1.1.1.1",
+					Hops: []Hop{
+						{TTL: 1, IP: "192.168.1.254"},
+						{TTL: 2, IP: "10.1.0.1"},
+						{TTL: 3, IP: "1.1.1.1", Reached: true},
+					},
+				},
+			},
+			want: []string{
+				"├ 1. 192.168.1.254",
+				"├ 2. 10.1.0.1（單位防火牆）",
+				"└ 3. 1.1.1.1（抵達）",
+			},
+		},
+		{
+			name:      "對外連線 Red 且未抵達",
+			f:         factsOfRouteBroken(),
+			egressRed: true,
+			want: []string{
+				"├ 1. 192.168.1.1（路由器）",
+				"┊",
+				"└ 3. 198.51.100.7  ◀ 最後回應",
+			},
+		},
+		{
+			name: "對外連線 Red 但已抵達",
+			f: Facts{
+				Local: Local{Gateway: "192.168.1.1"},
+				Route: RouteResult{
+					Target: "1.1.1.1",
+					Hops: []Hop{
+						{TTL: 1, IP: "192.168.1.1"},
+						{TTL: 2, IP: "1.1.1.1", Reached: true},
+					},
+				},
+			},
+			egressRed: true,
+			want: []string{
+				"├ 1. 192.168.1.1（路由器）",
+				"└ 2. 1.1.1.1（抵達）",
+			},
+		},
+		{
+			name:      "對外連線未 Red 且未抵達",
+			f:         factsOfRouteBroken(),
+			egressRed: false,
+			want: []string{
+				"├ 1. 192.168.1.1（路由器）",
+				"┊",
+				"└ 3. 198.51.100.7",
+			},
+		},
+	}
+	for _, c := range cases {
+		got := routeMapLines(c.f, c.egressRed)
+		if !slices.Equal(got, c.want) {
+			t.Errorf("%s：routeMapLines =\n%q\n預期\n%q", c.name, got, c.want)
+		}
+	}
+}
+
+// factsOfRouteBroken：有回應但沒抵達、TTL 有缺口、對外連線不一定 Red 的路由
+func factsOfRouteBroken() Facts {
+	return Facts{
+		Local: Local{Gateway: "192.168.1.1"},
+		Route: RouteResult{
+			Target: "1.1.1.1",
+			Hops: []Hop{
+				{TTL: 1, IP: "192.168.1.1"},
+				{TTL: 3, IP: "198.51.100.7"},
+			},
+		},
+	}
+}
+
+func TestRenderMapRouteGolden(t *testing.T) {
+	f, cfg := screens()["a_ok"]()
+	f.Local.Gateway = "192.168.1.1"
+	f.Route = RouteResult{
+		Target: "1.1.1.1",
+		Hops: []Hop{
+			{TTL: 1, IP: "192.168.1.1"},
+			{TTL: 2, IP: "198.51.100.1"},
+			{TTL: 4, IP: "203.0.113.9"},
+			{TTL: 5, IP: "1.1.1.1", Reached: true},
+		},
+	}
+	r := decide(f, cfg)
+	var b bytes.Buffer
+	renderMap(&b, r.Lights, false, routeMapLines(f, false))
+	checkGolden(t, "map_route", b.Bytes())
+}
+
+func TestRenderMapRouteBroken(t *testing.T) {
+	f := factsOfRouteBroken()
+	f.Route.Target = "1.1.1.1"
+	lights := []Light{
+		{Name: "本機網路", Status: Green, Summary: "Wi-Fi 192.168.1.23"},
+		{Name: "路由器", Status: Green, Summary: "192.168.1.1 有回應"},
+		{Name: "對外連線", Status: Red, Summary: "無法連到網際網路"},
+		{Name: "網址查詢", Status: Skip, Summary: "前一段異常，未檢查"},
+		{Name: "網站連線", Status: Skip, Summary: "前一段異常，未檢查"},
+	}
+	var b bytes.Buffer
+	renderMap(&b, lights, false, routeMapLines(f, true))
+	lines := splitMapLines(t, b.String())
+
+	// 分支行前綴為「  ┆   」，最後一行含「◀ 最後回應」（不含 TTL 缺口的「┊」行）
+	branchLines := 0
+	lastBranch := ""
+	for _, ln := range lines {
+		if strings.HasPrefix(ln, "  ┆   ├ ") || strings.HasPrefix(ln, "  ┆   └ ") {
+			branchLines++
+			lastBranch = ln
+		}
+	}
+	if branchLines != 2 {
+		t.Errorf("路由分支行數 = %d，預期 2", branchLines)
+	}
+	if !strings.Contains(lastBranch, "◀ 最後回應") {
+		t.Errorf("最後一行分支行應含「◀ 最後回應」：%q", lastBranch)
+	}
+
+	// 「◀ 斷在這裡」仍只出現一次、在「對外連線」站行
+	brokenLines := 0
+	for _, ln := range lines {
+		if strings.Contains(ln, "◀ 斷在這裡") {
+			brokenLines++
+			if !strings.Contains(ln, "對外連線") {
+				t.Errorf("「◀ 斷在這裡」行應為「對外連線」站行：%q", ln)
+			}
+		}
+	}
+	if brokenLines != 1 {
+		t.Errorf("「◀ 斷在這裡」出現 %d 次，預期 1 次", brokenLines)
 	}
 }

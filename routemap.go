@@ -59,8 +59,37 @@ func mapFrame(names []string, states []mapState, spin int) []string {
 	return lines
 }
 
+// routeMapLines：路線圖中「對外連線」底下的路由分支行（不含前綴的連接線，由 renderMap 補上）
+func routeMapLines(f Facts, egressRed bool) []string {
+	if f.Route.Target == "" {
+		return nil
+	}
+	if f.Route.Unknown {
+		return []string{"（這台電腦無法執行路由追蹤）"}
+	}
+	if len(f.Route.Hops) == 0 {
+		return []string{"（路由追蹤沒有任何節點回應）"}
+	}
+	var lines []string
+	last := len(f.Route.Hops) - 1
+	for i, h := range f.Route.Hops {
+		branch := "├ "
+		if i == last {
+			branch = "└ "
+		}
+		lines = append(lines, branch+fmt.Sprintf("%d. %s", h.TTL, h.IP)+hopLabel(f, h))
+		if i < last && f.Route.Hops[i+1].TTL != h.TTL+1 {
+			lines = append(lines, "┊")
+		}
+	}
+	if egressRed && !f.Route.Hops[last].Reached {
+		lines[len(lines)-1] += "  ◀ 最後回應"
+	}
+	return lines
+}
+
 // renderMap：以路線圖輸出燈號（不含標題與結論，由呼叫端處理）
-func renderMap(w io.Writer, lights []Light, detail bool) {
+func renderMap(w io.Writer, lights []Light, detail bool, route []string) {
 	broken := -1 // 第一個 Red 的站
 	for i, l := range lights {
 		if l.Status == Red {
@@ -88,6 +117,18 @@ func renderMap(w io.Writer, lights []Light, detail bool) {
 			}
 			for _, e := range l.Evidence {
 				fmt.Fprintf(w, "%s%s\n", evPrefix, e)
+			}
+		}
+		// 「對外連線」底下的路由分支行：前綴沿用這一站之後那條連接線的符號
+		if l.Name == "對外連線" && len(route) > 0 {
+			c := "│"
+			if i == len(lights)-1 {
+				c = " "
+			} else if broken >= 0 && i >= broken {
+				c = "┆"
+			}
+			for _, ln := range route {
+				fmt.Fprintf(w, "  %s   %s\n", c, ln)
 			}
 		}
 		if i < len(lights)-1 {
@@ -167,7 +208,13 @@ func runMap(cfg Config, detail bool) int {
 	clearMapFrame(os.Stdout, prevLines)
 
 	r := decide(f, cfg)
-	renderMap(os.Stdout, r.Lights, detail)
+	egressRed := false
+	for _, l := range r.Lights {
+		if l.Name == "對外連線" && l.Status == Red {
+			egressRed = true
+		}
+	}
+	renderMap(os.Stdout, r.Lights, detail, routeMapLines(f, egressRed))
 	fmt.Fprintln(os.Stdout)
 	renderVerdict(os.Stdout, r.Verdict)
 	return r.Verdict.Code.ExitCode()
