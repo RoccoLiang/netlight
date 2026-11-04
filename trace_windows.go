@@ -31,6 +31,9 @@ type ipOptionInformation struct {
 // 約 2 秒，只對 channel 傳送結果，不碰回傳的切片。handle 由各 goroutine 在自己的呼叫
 // 結束後自行關閉（Windows 上的例外：spec「回傳前關閉所有 handle」在此改為「各 goroutine
 // 結束時自行關閉」）。
+// 每個 TTL 不論成功、失敗（IcmpCreateFile 失敗、IcmpSendEcho 回傳 0、未處理的 Status）
+// 都會回報一筆結果，主流程以「已回報的 TTL 數」判斷全部結束，以「有 hop 的 TTL」判斷
+// 已抵達與較小 TTL 是否齊全。
 func traceRoute(ctx context.Context, target string, maxHops int) ([]Hop, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -47,7 +50,7 @@ func traceRoute(ctx context.Context, target string, maxHops int) ([]Hop, error) 
 
 	type result struct {
 		ttl int
-		hop Hop
+		hop *Hop // nil 表示這一站沒有結果（失敗或無回應）
 	}
 	results := make(chan result, maxHops) // 容量 maxHops：各 goroutine 傳送永不阻塞
 	unavailable := make(chan struct{})    // IcmpCreateFile 失敗
@@ -56,6 +59,7 @@ func traceRoute(ctx context.Context, target string, maxHops int) ([]Hop, error) 
 		go func(ttl int) {
 			h, _, _ := procIcmpCreate.Call()
 			if windows.Handle(h) == windows.InvalidHandle {
+				results <- result{ttl, nil}
 				unavailableOnce.Do(func() { close(unavailable) })
 				return
 			}
@@ -66,6 +70,7 @@ func traceRoute(ctx context.Context, target string, maxHops int) ([]Hop, error) 
 				wait = min(wait, time.Until(dl))
 			}
 			if wait <= 0 {
+				results <- result{ttl, nil}
 				return
 			}
 			data := []byte("netlight")
@@ -76,6 +81,7 @@ func traceRoute(ctx context.Context, target string, maxHops int) ([]Hop, error) 
 				uintptr(unsafe.Pointer(&opts)),
 				uintptr(unsafe.Pointer(&reply[0])), uintptr(len(reply)), uintptr(wait.Milliseconds()))
 			if n == 0 {
+				results <- result{ttl, nil}
 				return
 			}
 			r := (*icmpEchoReply)(unsafe.Pointer(&reply[0]))
@@ -83,23 +89,24 @@ func traceRoute(ctx context.Context, target string, maxHops int) ([]Hop, error) 
 			binary.LittleEndian.PutUint32(b[:], r.Address)
 			switch r.Status {
 			case 11013: // IP_TTL_EXPIRED_TRANSIT：回應的就是這一站的路由器
-				results <- result{ttl, Hop{TTL: ttl, IP: net.IP(b[:]).String(), Ms: int64(r.RoundTripTime)}}
+				results <- result{ttl, &Hop{TTL: ttl, IP: net.IP(b[:]).String(), Ms: int64(r.RoundTripTime)}}
 			case 0: // 抵達目的地
-				results <- result{ttl, Hop{TTL: ttl, IP: net.IP(b[:]).String(), Ms: int64(r.RoundTripTime), Reached: true}}
+				results <- result{ttl, &Hop{TTL: ttl, IP: net.IP(b[:]).String(), Ms: int64(r.RoundTripTime), Reached: true}}
+			default: // 未處理的 Status：視為這一站沒有結果
+				results <- result{ttl, nil}
 			}
 		}(ttl)
 	}
 
-	hops := make([]Hop, maxHops+1) // index = TTL（0 不用）
-	got := make([]bool, maxHops+1)
+	hops := make([]*Hop, maxHops+1) // index = TTL（0 不用）；nil 表示該站沒有結果
 	reachedTTL := 0
-	reported := 0
-	finished := func() bool { // 已抵達且較小的 TTL 都有回應 → 可結束
+	reported := 0             // 已回報的 TTL 數（不論有沒有 hop）
+	finished := func() bool { // 已抵達且較小的 TTL 都有結果 → 可結束
 		if reachedTTL == 0 {
 			return false
 		}
 		for i := 1; i < reachedTTL; i++ {
-			if !got[i] {
+			if hops[i] == nil {
 				return false
 			}
 		}
@@ -108,8 +115,8 @@ func traceRoute(ctx context.Context, target string, maxHops int) ([]Hop, error) 
 	collect := func() []Hop {
 		var out []Hop
 		for ttl := 1; ttl <= maxHops; ttl++ { // 依 TTL 由小到大
-			if got[ttl] {
-				out = append(out, hops[ttl])
+			if hops[ttl] != nil {
+				out = append(out, *hops[ttl])
 			}
 		}
 		return out
@@ -122,8 +129,8 @@ func traceRoute(ctx context.Context, target string, maxHops int) ([]Hop, error) 
 			return nil, errICMPUnavailable
 		case r := <-results:
 			reported++
-			if !got[r.ttl] {
-				got[r.ttl], hops[r.ttl] = true, r.hop
+			if r.hop != nil && hops[r.ttl] == nil {
+				hops[r.ttl] = r.hop
 				if r.hop.Reached && (reachedTTL == 0 || r.ttl < reachedTTL) { // 只記最小的抵達 TTL
 					reachedTTL = r.ttl
 				}

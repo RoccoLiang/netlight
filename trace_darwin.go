@@ -30,6 +30,7 @@ func traceRoute(ctx context.Context, target string, maxHops int) ([]Hop, error) 
 		ctx, cancel = context.WithTimeout(ctx, traceTimeout)
 		defer cancel()
 	}
+	deadline, _ := ctx.Deadline() // 函式開頭已確保 ctx 有期限
 	dst := &net.UDPAddr{IP: net.ParseIP(target)}
 	if dst.IP == nil || dst.IP.To4() == nil {
 		return nil, errors.New("路由追蹤僅支援 IPv4 位址")
@@ -39,40 +40,18 @@ func traceRoute(ctx context.Context, target string, maxHops int) ([]Hop, error) 
 		c   *icmp.PacketConn
 		ttl int
 	}
+	var mu sync.Mutex // 保護 tracers（協調 goroutine 可能同時關閉 socket）
 	tracers := make([]*tracer, 0, maxHops)
-	defer func() {
+	closeAll := func() {
+		mu.Lock()
+		defer mu.Unlock()
 		for _, tr := range tracers {
 			tr.c.Close()
-		}
-	}()
-	// 每個 TTL 一個 socket：開啟後只 SetTTL 一次再送出，TTL 才會正確
-	base := int(time.Now().UnixNano() & 0x3fff)
-	sent := make([]time.Time, maxHops+1) // index = TTL
-	for ttl := 1; ttl <= maxHops; ttl++ {
-		c, err := icmp.ListenPacket("udp4", "0.0.0.0")
-		if err != nil {
-			if errors.Is(err, syscall.EACCES) || errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EPROTONOSUPPORT) {
-				return nil, errICMPUnavailable
-			}
-			return nil, err
-		}
-		if err := c.IPv4PacketConn().SetTTL(ttl); err != nil {
-			c.Close()
-			return nil, err
-		}
-		tracers = append(tracers, &tracer{c: c, ttl: ttl})
-		msg, err := (&icmp.Message{Type: ipv4.ICMPTypeEcho, Body: &icmp.Echo{ID: traceEchoID, Seq: base + ttl, Data: []byte("netlight")}}).Marshal(nil)
-		if err != nil {
-			return nil, err
-		}
-		sent[ttl] = time.Now()
-		if _, err := c.WriteTo(msg, dst); err != nil {
-			return nil, err
 		}
 	}
 
 	// 共用的結果狀態（每個 socket 的讀取 goroutine 都會寫入）
-	var mu sync.Mutex
+	var rmu sync.Mutex
 	received := make([]bool, maxHops+1) // index = TTL
 	hops := make([]Hop, maxHops+1)
 	reachedTTL := 0
@@ -90,8 +69,8 @@ func traceRoute(ctx context.Context, target string, maxHops int) ([]Hop, error) 
 	done := make(chan struct{}) // 結束條件達成
 	var doneOnce sync.Once
 	record := func(ttl int, hop Hop) {
-		mu.Lock()
-		defer mu.Unlock()
+		rmu.Lock()
+		defer rmu.Unlock()
 		if received[ttl] { // 已記錄的 TTL 不再加入（同一回覆會送到每個 socket）
 			return
 		}
@@ -104,8 +83,82 @@ func traceRoute(ctx context.Context, target string, maxHops int) ([]Hop, error) 
 		}
 	}
 
-	// 每個 socket 一個讀取 goroutine；結束條件達成或 ctx 結束時關閉所有 socket 中斷讀取
+	// 讀取 goroutine 的收尾：等全部結束後通知 readersDone（只會關一次）
 	var wg sync.WaitGroup
+	readersDone := make(chan struct{})
+	var readersOnce sync.Once
+	readersFinished := func() {
+		wg.Wait()
+		readersOnce.Do(func() { close(readersDone) })
+	}
+
+	// 協調 goroutine：在第一次送出之前啟動；ctx 結束或結束條件達成時關閉所有 socket
+	// 中斷讀取，並在所有讀取 goroutine 結束後退出（讀取 goroutine 自行全部結束時
+	// 經由 readersDone 直接退出，不關閉 socket）。
+	abandon := make(chan struct{}) // 送出階段失敗，提早回傳時通知協調 goroutine 退出
+	coordExited := make(chan struct{})
+	go func() {
+		defer close(coordExited)
+		select {
+		case <-ctx.Done():
+		case <-done:
+		case <-readersDone:
+			return
+		case <-abandon:
+			return
+		}
+		closeAll()
+		<-readersDone
+	}()
+	// 送出階段失敗時的收尾：通知協調 goroutine 退出、關閉所有 socket、等讀取 goroutine 結束
+	abort := func(err error) ([]Hop, error) {
+		close(abandon)
+		closeAll()
+		readersFinished()
+		<-coordExited
+		return nil, err
+	}
+
+	// 每個 TTL 一個 socket：開啟後先以 ctx 期限設定讀寫期限（送出受期限保護），
+	// 再只 SetTTL 一次送出，TTL 才會正確
+	base := int(time.Now().UnixNano() & 0x3fff)
+	sent := make([]time.Time, maxHops+1) // index = TTL
+	for ttl := 1; ttl <= maxHops; ttl++ {
+		c, err := icmp.ListenPacket("udp4", "0.0.0.0")
+		if err != nil {
+			if errors.Is(err, syscall.EACCES) || errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EPROTONOSUPPORT) {
+				return abort(errICMPUnavailable)
+			}
+			return abort(err)
+		}
+		if err := c.SetDeadline(deadline); err != nil {
+			c.Close()
+			return abort(err)
+		}
+		if err := c.IPv4PacketConn().SetTTL(ttl); err != nil {
+			c.Close()
+			return abort(err)
+		}
+		tr := &tracer{c: c, ttl: ttl}
+		msg, err := (&icmp.Message{Type: ipv4.ICMPTypeEcho, Body: &icmp.Echo{ID: traceEchoID, Seq: base + ttl, Data: []byte("netlight")}}).Marshal(nil)
+		if err != nil {
+			c.Close()
+			return abort(err)
+		}
+		sent[ttl] = time.Now()
+		if _, err := c.WriteTo(msg, dst); err != nil {
+			c.Close()
+			if ctx.Err() != nil { // 期限已到（送出受 SetDeadline 保護）
+				return abort(ctx.Err())
+			}
+			return abort(err)
+		}
+		mu.Lock()
+		tracers = append(tracers, tr)
+		mu.Unlock()
+	}
+
+	// 每個 socket 一個讀取 goroutine；socket 關閉（結束時）、期限到或讀取錯誤時結束
 	for _, tr := range tracers {
 		wg.Add(1)
 		go func(tr *tracer) {
@@ -114,7 +167,7 @@ func traceRoute(ctx context.Context, target string, maxHops int) ([]Hop, error) 
 			for {
 				n, from, err := tr.c.ReadFrom(buf)
 				if err != nil {
-					return // socket 關閉（結束時）或其他讀取錯誤
+					return // socket 關閉（結束時）、期限到或其他讀取錯誤
 				}
 				b := buf[:n]
 				// macOS 的 ICMP 錯誤訊息（Time Exceeded）會帶完整 IP 封包，先剝掉外層標頭
@@ -152,16 +205,9 @@ func traceRoute(ctx context.Context, target string, maxHops int) ([]Hop, error) 
 			}
 		}(tr)
 	}
-	go func() {
-		select {
-		case <-ctx.Done():
-		case <-done:
-		}
-		for _, tr := range tracers {
-			tr.c.Close()
-		}
-	}()
-	wg.Wait()
+	readersFinished() // 等所有讀取 goroutine 結束並通知協調 goroutine
+	<-coordExited     // 等協調 goroutine 結束
+	closeAll()        // 保險：讀取 goroutine 自行結束的路徑不會由協調 goroutine 關閉 socket
 
 	var out []Hop
 	for ttl := 1; ttl <= maxHops; ttl++ { // 依 TTL 由小到大
