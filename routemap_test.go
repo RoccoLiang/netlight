@@ -13,6 +13,22 @@ func mapGoldenCase(name string) Report {
 	return decide(f, cfg)
 }
 
+// splitMapLines：切出輸出行（去除結尾換行）
+func splitMapLines(t *testing.T, out string) []string {
+	t.Helper()
+	return strings.Split(strings.TrimSuffix(out, "\n"), "\n")
+}
+
+// firstRedLight：第一個 Red 燈的索引；沒有 Red 回 -1
+func firstRedLight(lights []Light) int {
+	for i, l := range lights {
+		if l.Status == Red {
+			return i
+		}
+	}
+	return -1
+}
+
 func TestRenderMapGolden(t *testing.T) {
 	for _, name := range []string{"map_b_dns", "map_c_router", "map_o_org_down"} {
 		r := mapGoldenCase(strings.TrimPrefix(name, "map_"))
@@ -20,38 +36,49 @@ func TestRenderMapGolden(t *testing.T) {
 		renderMap(&b, r.Lights, false)
 		checkGolden(t, name, b.Bytes())
 
-		lines := strings.Split(strings.TrimSuffix(b.String(), "\n"), "\n")
-		brokenIdx := -1
-		brokenCount := 0
-		for i, ln := range lines {
+		lines := splitMapLines(t, b.String())
+		brokenIdx := firstRedLight(r.Lights)
+		if brokenIdx < 0 {
+			t.Fatalf("%s 應有 Red 燈", name)
+		}
+
+		// 恰有一行含「◀ 斷在這裡」，且同時含第一個 Red 燈的名稱
+		brokenLines := 0
+		for _, ln := range lines {
 			if strings.Contains(ln, "◀ 斷在這裡") {
-				brokenCount++
-				brokenIdx = i
-			}
-		}
-		if brokenCount != 1 {
-			t.Errorf("%s 應恰有一行含「◀ 斷在這裡」，實際 %d 行", name, brokenCount)
-			continue
-		}
-		// 該行必須是第一個 Red 的站：之前的站行符號不是 ╳
-		for _, ln := range lines[:brokenIdx] {
-			if strings.Contains(ln, "╳ ") {
-				t.Errorf("%s 「◀ 斷在這裡」不在第一個 Red 的站：\n%s", name, b.String())
-				break
-			}
-		}
-		// 斷點之後的連接線為 ┆、之前為 │
-		for i, ln := range lines {
-			switch ln {
-			case "  ┆":
-				if i < brokenIdx {
-					t.Errorf("%s 斷點之前不應出現 ┆：\n%s", name, b.String())
-				}
-			case "  │":
-				if i > brokenIdx {
-					t.Errorf("%s 斷點之後不應出現 │：\n%s", name, b.String())
+				brokenLines++
+				if !strings.Contains(ln, r.Lights[brokenIdx].Name) {
+					t.Errorf("%s 「◀ 斷在這裡」行不含第一個 Red 燈名稱 %q：%q", name, r.Lights[brokenIdx].Name, ln)
 				}
 			}
+		}
+		if brokenLines != 1 {
+			t.Errorf("%s 應恰有一行含「◀ 斷在這裡」，實際 %d 行", name, brokenLines)
+		}
+
+		// 連接線總數 = 燈數 - 1；斷點之後全為 ┆、之前全為 │
+		connCount := 0
+		for _, ln := range lines {
+			if ln == "  │" || ln == "  ┆" {
+				connCount++
+			}
+		}
+		if connCount != len(r.Lights)-1 {
+			t.Errorf("%s 連接線總數 = %d，預期 %d", name, connCount, len(r.Lights)-1)
+		}
+		connIdx := 0 // 目前是第幾條連接線（在站 brokenIdx 之後的連接線應為 ┆）
+		for _, ln := range lines {
+			if ln != "  │" && ln != "  ┆" {
+				continue
+			}
+			if connIdx >= brokenIdx {
+				if ln != "  ┆" {
+					t.Errorf("%s 第 %d 條連接線應為 ┆：%q", name, connIdx, ln)
+				}
+			} else if ln != "  │" {
+				t.Errorf("%s 第 %d 條連接線應為 │：%q", name, connIdx, ln)
+			}
+			connIdx++
 		}
 	}
 }
@@ -60,20 +87,57 @@ func TestRenderMapAllGreen(t *testing.T) {
 	r := mapGoldenCase("a_ok")
 	var b bytes.Buffer
 	renderMap(&b, r.Lights, false)
-	if strings.Contains(b.String(), "◀ 斷在這裡") || strings.Contains(b.String(), "┆") {
-		t.Errorf("全部正常時不應有斷點標記或虛線：\n%s", b.String())
+	out := b.String()
+	if strings.Contains(out, "◀ 斷在這裡") || strings.Contains(out, "┆") {
+		t.Errorf("全部正常時不應有斷點標記或虛線：\n%s", out)
+	}
+	lines := splitMapLines(t, out)
+	if len(lines) != 2*len(r.Lights)-1 {
+		t.Errorf("行數 = %d，預期 %d", len(lines), 2*len(r.Lights)-1)
+	}
+	var order []int
+	for i, ln := range lines {
+		if i%2 == 0 { // 站行
+			for j, l := range r.Lights {
+				if strings.Contains(ln, l.Name) {
+					order = append(order, j)
+					break
+				}
+			}
+		} else if ln != "  │" {
+			t.Errorf("第 %d 行應為連接線：%q", i, ln)
+		}
+	}
+	// 每個燈名都出現且依序
+	for i, want := range order {
+		if i != want {
+			t.Fatalf("站順序 = %v，預期依序出現", order)
+		}
+	}
+	if len(order) != len(r.Lights) {
+		t.Errorf("站行數 = %d，預期 %d", len(order), len(r.Lights))
 	}
 }
 
 func TestRenderMapDetail(t *testing.T) {
-	r := mapGoldenCase("a_ok")
-	var b bytes.Buffer
-	renderMap(&b, r.Lights, true)
-	if !strings.Contains(b.String(), "  │     · ") {
-		t.Errorf("detail 模式應列出證據：\n%s", b.String())
+	lights := []Light{
+		{Name: "本機網路", Status: Green, Summary: "Wi-Fi 192.168.1.23", Evidence: []string{"介面：en0", "IP：192.168.1.23"}},
+		{Name: "路由器", Status: Red, Summary: "192.168.1.1 沒有回應", Evidence: []string{"路由器位址：192.168.1.1"}},
+		{Name: "對外連線", Status: Skip, Summary: "前一段異常，未檢查", Evidence: []string{"未檢查"}},
 	}
-	if !strings.Contains(b.String(), "        · ") {
-		t.Errorf("detail 模式最後一站證據應以空白縮排：\n%s", b.String())
+	var b bytes.Buffer
+	renderMap(&b, lights, true)
+	want := "  ● 本機網路　🟢 正常  Wi-Fi 192.168.1.23\n" +
+		"  │     · 介面：en0\n" +
+		"  │     · IP：192.168.1.23\n" +
+		"  │\n" +
+		"  ╳ 路由器　　🔴 故障  192.168.1.1 沒有回應  ◀ 斷在這裡\n" +
+		"  │     · 路由器位址：192.168.1.1\n" +
+		"  ┆\n" +
+		"  ○ 對外連線　⚪ 略過  前一段異常，未檢查\n" +
+		"        · 未檢查\n"
+	if b.String() != want {
+		t.Errorf("detail 輸出不符：\n--- 得到 ---\n%s\n--- 預期 ---\n%s", b.String(), want)
 	}
 }
 
@@ -113,9 +177,30 @@ func TestMapStates(t *testing.T) {
 
 func TestLightNeedsCoversNames(t *testing.T) {
 	cfg := Config{Checkpoints: []Checkpoint{{Host: "10.1.0.1", Check: "tcp:443"}}}
-	for _, name := range lightNames(cfg) {
+	names := lightNames(cfg)
+	if len(lightNeeds) != len(names) {
+		t.Fatalf("lightNeeds 有 %d 個 key，lightNames 有 %d 個名稱，集合應恰好相等", len(lightNeeds), len(names))
+	}
+	for _, name := range names {
 		if _, ok := lightNeeds[name]; !ok {
 			t.Errorf("lightNeeds 缺少站名 %q", name)
+		}
+	}
+}
+
+func TestClearMapFrame(t *testing.T) {
+	cases := []struct {
+		lines int
+		want  string
+	}{
+		{3, "\x1b[3A\r\x1b[2K\x1b[1B\r\x1b[2K\x1b[1B\r\x1b[2K\x1b[2A"},
+		{1, "\x1b[1A\r\x1b[2K"},
+	}
+	for _, c := range cases {
+		var b bytes.Buffer
+		clearMapFrame(&b, c.lines)
+		if b.String() != c.want {
+			t.Errorf("clearMapFrame(lines=%d) = %q，預期 %q", c.lines, b.String(), c.want)
 		}
 	}
 }

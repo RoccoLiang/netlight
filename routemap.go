@@ -101,16 +101,16 @@ func renderMap(w io.Writer, lights []Light, detail bool) {
 }
 
 // clearMapFrame：游標上移 lines 行、逐行清除畫面後，回到畫面第一行
-func clearMapFrame(lines int) {
-	fmt.Fprintf(os.Stdout, "\x1b[%dA", lines)
+func clearMapFrame(w io.Writer, lines int) {
+	fmt.Fprintf(w, "\x1b[%dA", lines)
 	for i := range lines {
-		fmt.Print("\r\x1b[2K")
+		fmt.Fprint(w, "\r\x1b[2K")
 		if i < lines-1 {
-			fmt.Print("\x1b[1B")
+			fmt.Fprint(w, "\x1b[1B")
 		}
 	}
 	if lines > 1 {
-		fmt.Fprintf(os.Stdout, "\x1b[%dA", lines-1)
+		fmt.Fprintf(w, "\x1b[%dA", lines-1)
 	}
 }
 
@@ -152,7 +152,7 @@ func runMap(cfg Config, detail bool) int {
 				mu.Lock()
 				states := mapStates(names, done)
 				mu.Unlock()
-				clearMapFrame(prevLines)
+				clearMapFrame(os.Stdout, prevLines)
 				draw(mapFrame(names, states, spin))
 				prevLines = len(names)*2 - 1
 			}
@@ -164,7 +164,7 @@ func runMap(cfg Config, detail bool) int {
 	<-stopped
 
 	// 只清除一次進行中畫面（標題與空行保留）
-	clearMapFrame(prevLines)
+	clearMapFrame(os.Stdout, prevLines)
 
 	r := decide(f, cfg)
 	renderMap(os.Stdout, r.Lights, detail)
