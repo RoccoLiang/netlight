@@ -89,8 +89,9 @@ type GatewayResult struct {
 type Site struct {
 	Name string `json:"name"`
 	Probe
-	Status int    `json:"status,omitempty"`
-	Route  string `json:"route,omitempty"` // 實際選路：direct、proxy、pac（空為未知）
+	Status int         `json:"status,omitempty"`
+	Route  string      `json:"route,omitempty"`  // 實際選路：direct、proxy、pac（空為未知）
+	Phases *SitePhases `json:"phases,omitempty"` // 同一次請求的分段耗時
 }
 
 type Captive struct {
@@ -783,6 +784,9 @@ func lightSites(f Facts, prev Light, anyReached bool, bad []string, row verdictR
 			line += "（直連）"
 		}
 		l.Evidence = append(l.Evidence, line)
+		if pl := phaseLine(s, f.Local.Proxy.Mode); pl != "" {
+			l.Evidence = append(l.Evidence, pl)
+		}
 	}
 	if f.Captive.Checked {
 		c := "登入頁面檢查：沒有被導向"

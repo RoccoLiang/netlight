@@ -448,6 +448,31 @@ func TestRouteEvidence(t *testing.T) {
 	}
 }
 
+func TestLightSitesPhases(t *testing.T) {
+	f := healthy()
+	f.Sites[0].Phases = &SitePhases{DNSMs: 3, ConnectMs: 5, TLSMs: 7, WaitMs: 9, Reached: "response"}
+	with := lightSites(f, Light{Status: Green}, true, nil, verdictRow{})
+	without := lightSites(healthy(), Light{Status: Green}, true, nil, verdictRow{})
+	if len(with.Evidence) != len(without.Evidence)+1 {
+		t.Fatalf("有 Phases 時證據應多一行：%d vs %d", len(with.Evidence), len(without.Evidence))
+	}
+	if with.Evidence[0] != without.Evidence[0] {
+		t.Errorf("網站證據行不應改變：%q vs %q", with.Evidence[0], without.Evidence[0])
+	}
+	if with.Evidence[1] != phaseLine(f.Sites[0], ProxyNone) {
+		t.Errorf("第二行應為 phaseLine 的結果：%q", with.Evidence[1])
+	}
+	for i, ev := range without.Evidence[1:] {
+		if with.Evidence[i+2] != ev {
+			t.Errorf("證據行 %d 不應改變：%q vs %q", i+2, with.Evidence[i+2], ev)
+		}
+	}
+	// 沒有 Phases 時證據行數不變（沒有額外的分段行）
+	if len(without.Evidence) != len(lightSites(healthy(), Light{Status: Green}, true, nil, verdictRow{}).Evidence) {
+		t.Error("沒有 Phases 時證據行數不應改變")
+	}
+}
+
 func TestSiteRouteOf(t *testing.T) {
 	s := Site{Name: "Google", Route: "direct"}
 	if got := siteRouteOf(s, ProxyExplicit); got != "direct" {

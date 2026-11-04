@@ -95,6 +95,51 @@ func TestSiteProbe(t *testing.T) {
 	}
 }
 
+// TestSiteProbePhases：本機 TLS 伺服器應記到完整的分段計時
+func TestSiteProbePhases(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer srv.Close()
+	roots := srv.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs
+	s := siteProbe(context.Background(), newClient(Proxy{}, roots, 2*time.Second), Target{"正常", srv.URL})
+	if !s.OK {
+		t.Fatalf("信任憑證後應成功：%+v", s)
+	}
+	if s.Phases == nil {
+		t.Fatal("siteProbe 應填入 Phases")
+	}
+	if s.Phases.Reached != "response" {
+		t.Errorf("Reached = %q，預期 \"response\"", s.Phases.Reached)
+	}
+	if s.Phases.TLSMs < 0 || s.Phases.ConnectMs < 0 {
+		t.Errorf("TLS 與 TCP 都應非負：%+v", s.Phases)
+	}
+}
+
+// TestSiteProbePhasesWaitStall：伺服器收到請求後不回應，client 逾時 → 停在等待回應
+func TestSiteProbePhasesWaitStall(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done() // 阻塞到 client 逾時、連線中斷
+	}))
+	defer srv.Close()
+	roots := srv.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs
+	s := siteProbe(context.Background(), newClient(Proxy{}, roots, 300*time.Millisecond), Target{"慢", srv.URL})
+	if s.OK {
+		t.Fatal("逾時不應成功")
+	}
+	if s.Phases == nil {
+		t.Fatal("siteProbe 應填入 Phases")
+	}
+	if s.Phases.Reached != "tls" {
+		t.Errorf("Reached = %q，預期 \"tls\"", s.Phases.Reached)
+	}
+	if s.Phases.Stalled != "wait" {
+		t.Errorf("Stalled = %q，預期 \"wait\"", s.Phases.Stalled)
+	}
+	if pl := phaseLine(s, ProxyNone); !strings.Contains(pl, "停在：等待網站回應") {
+		t.Errorf("phaseLine = %q，應含「停在：等待網站回應」", pl)
+	}
+}
+
 func TestSiteRoute(t *testing.T) {
 	for _, k := range []string{"HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy"} {
 		t.Setenv(k, "")

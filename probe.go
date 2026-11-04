@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"os"
 	"slices"
@@ -270,6 +271,8 @@ func siteRoute(px Proxy, rawURL string) string {
 func siteProbe(ctx context.Context, cl *http.Client, t Target) Site {
 	s := Site{Name: t.Name, Probe: Probe{Target: t.URL}}
 	start := time.Now()
+	rec := newPhaseRecorder()
+	ctx = httptrace.WithClientTrace(ctx, rec.trace())
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, t.URL, nil)
 	req.Header.Set("User-Agent", "netlight/"+version)
 	resp, err := cl.Do(req)
@@ -278,6 +281,7 @@ func siteProbe(ctx context.Context, cl *http.Client, t Target) Site {
 		s.Status = resp.StatusCode
 		resp.Body.Close()
 	}
+	s.Phases = rec.snapshot()
 	return s
 }
 
