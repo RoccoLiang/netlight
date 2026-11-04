@@ -245,6 +245,29 @@ func newClient(px Proxy, roots *x509.CertPool, timeout time.Duration) *http.Clie
 	}
 }
 
+// siteRoute：依代理設定判斷這個網址實際會走直連、代理，或 PAC（未執行、實際直連）
+func siteRoute(px Proxy, rawURL string) string {
+	switch px.Mode {
+	case ProxyPAC:
+		return "pac"
+	case ProxyNone:
+		return "direct"
+	}
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		return ""
+	}
+	f := proxyFunc(px)
+	if f == nil {
+		return "direct"
+	}
+	u, err := f(req)
+	if err != nil || u == nil {
+		return "direct"
+	}
+	return "proxy"
+}
+
 func siteProbe(ctx context.Context, cl *http.Client, t Target) Site {
 	s := Site{Name: t.Name, Probe: Probe{Target: t.URL}}
 	start := time.Now()
@@ -741,7 +764,11 @@ func runWithEvents(ctx context.Context, cfg Config, emit func(stage string)) Fac
 	sitesWg := group(stageSites, func() {
 		var swg sync.WaitGroup
 		for i, t := range targets {
-			swg.Go(func() { f.Sites[i] = siteProbe(ctx, cl, t) })
+			i, t := i, t
+			swg.Go(func() {
+				f.Sites[i] = siteProbe(ctx, cl, t)
+				f.Sites[i].Route = siteRoute(lo.Proxy, t.URL)
+			})
 		}
 		swg.Wait()
 	})

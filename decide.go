@@ -89,7 +89,8 @@ type GatewayResult struct {
 type Site struct {
 	Name string `json:"name"`
 	Probe
-	Status int `json:"status,omitempty"`
+	Status int    `json:"status,omitempty"`
+	Route  string `json:"route,omitempty"` // 實際選路：direct、proxy、pac（空為未知）
 }
 
 type Captive struct {
@@ -316,6 +317,20 @@ func isDefaultTarget(s Site) bool {
 	return slices.ContainsFunc(defaultTargets, func(t Target) bool { return t.URL == s.Target })
 }
 
+// siteRouteOf：網站的實際選路；缺漏時依代理模式推定（維持舊行為）
+func siteRouteOf(s Site, mode ProxyMode) string {
+	if s.Route != "" {
+		return s.Route
+	}
+	switch mode {
+	case ProxyEnv, ProxyExplicit:
+		return "proxy"
+	case ProxyPAC:
+		return "pac"
+	}
+	return "direct"
+}
+
 // paren：非空字串加上全形括號
 func paren(s string) string {
 	if s == "" {
@@ -365,8 +380,18 @@ func decide(f Facts, cfg Config) Report {
 	dnsOK := anyOK(f.DNS)
 	// DNS 伺服器有回「網址不存在」代表 DNS 服務本身正常
 	dnsFail := len(f.DNS) > 0 && !dnsOK && slices.ContainsFunc(f.DNS, func(p Probe) bool { return p.Err != ErrNotFound })
+	// 逐站判斷實際選路：只有真的經由代理的網站才把 DNS 解釋成由代理代查
+	proxySites, proxyReached := 0, false
+	for _, s := range f.Sites {
+		if siteRouteOf(s, f.Local.Proxy.Mode) == "proxy" {
+			proxySites++
+			if s.OK {
+				proxyReached = true
+			}
+		}
+	}
 	// 經由代理時由代理伺服器查網址，本機 DNS 不通不影響上網
-	dnsViaProxy := dnsFail && f.Local.Proxy.Mode != ProxyNone && anyReached
+	dnsViaProxy := dnsFail && proxyReached
 	hasIP := f.Local.IP != ""
 	// 一般 IPv4 網路卻沒有閘道（VPN、IPv6 本來就可能沒有）；讀取失敗時不算
 	noRouter := f.Local.Gateway == "" && f.Local.VPN == "" && !f.Local.GatewayUnknown && isIPv4(f.Local.IP)
@@ -395,7 +420,7 @@ func decide(f Facts, cfg Config) Report {
 		key = TLSIntercept
 	case len(f.Sites) > 0 && f.Local.Proxy.Mode == ProxyPAC && !anyReached:
 		key = ProxyPACCode
-	case len(f.Sites) > 0 && f.Local.Proxy.Mode != ProxyNone && !anyReached:
+	case len(f.Sites) > 0 && f.Local.Proxy.Mode != ProxyNone && proxySites > 0 && !anyReached:
 		key = ProxyCode
 	case orgConfigured && !orgAny && !internetOK:
 		key = OrgNetwork
@@ -459,7 +484,7 @@ func decide(f Facts, cfg Config) Report {
 		L = append(L, l)
 		prev = l
 	}
-	L = append(L, lightEgress(f, prev, internetOK, anyDirect, anyReached, certAny, pubDNSOK, cfg.ReplaceDefaultTargets, row))
+	L = append(L, lightEgress(f, prev, internetOK, anyDirect, anyReached, certAny, pubDNSOK, cfg.ReplaceDefaultTargets, proxySites, row))
 	L = append(L, lightDNS(f, L[len(L)-1], dnsFail, dnsOK, dnsViaProxy))
 	L = append(L, lightSites(f, L[len(L)-1], anyReached, badSites, row))
 	return Report{Lights: L, Verdict: v}
@@ -614,7 +639,7 @@ func routeEvidence(f Facts, internetOK bool) []string {
 	}
 	ev := []string{"路由追蹤（往 " + f.Route.Target + "）：" + strings.Join(items, " → ")}
 	if last := f.Route.Hops[len(f.Route.Hops)-1]; !internetOK && !last.Reached {
-		ev = append(ev, fmt.Sprintf("最後回應的節點：第 %d 站 %s%s", last.TTL, last.IP, hopLabel(f, last)))
+		ev = append(ev, fmt.Sprintf("最後有回應的節點：第 %d 站 %s%s", last.TTL, last.IP, hopLabel(f, last)))
 	}
 	return ev
 }
@@ -639,7 +664,7 @@ func hopLabel(f Facts, h Hop) string {
 	return "（" + strings.Join(labels, "、") + "）"
 }
 
-func lightEgress(f Facts, prev Light, internetOK, anyDirect, anyReached, certAny, pubDNSOK, onlyCustom bool, row verdictRow) Light {
+func lightEgress(f Facts, prev Light, internetOK, anyDirect, anyReached, certAny, pubDNSOK, onlyCustom bool, proxySites int, row verdictRow) Light {
 	l := Light{Name: "對外連線", Evidence: probeEvidence(f.Direct)}
 	var notes []string
 	if f.Local.VPN != "" {
@@ -649,6 +674,8 @@ func lightEgress(f Facts, prev Light, internetOK, anyDirect, anyReached, certAny
 	if f.Local.Proxy.Mode != ProxyNone {
 		if f.Local.Proxy.Mode == ProxyPAC {
 			notes = append(notes, "使用自動代理設定")
+		} else if len(f.Sites) > 0 && proxySites == 0 {
+			notes = append(notes, "設定了代理，但測試的網站都直連")
 		} else {
 			notes = append(notes, "經由代理")
 		}
@@ -735,10 +762,25 @@ func lightDNS(f Facts, prev Light, dnsFail, dnsOK, viaProxy bool) Light {
 
 func lightSites(f Facts, prev Light, anyReached bool, bad []string, row verdictRow) Light {
 	l := Light{Name: "網站連線"}
+	var limited []string // 401／403／429：連得上但被拒絕或限制
 	for _, s := range f.Sites {
 		line := probeLine(s.Name+" "+s.Target, s.Probe)
 		if s.OK {
 			line += fmt.Sprintf(" HTTP %d", s.Status)
+			switch s.Status {
+			case 401, 403:
+				line += "（連得上，但網站拒絕這次請求，可能需要登入或權限）"
+				limited = append(limited, s.Name)
+			case 429:
+				line += "（連得上，但網站暫時限制請求次數）"
+				limited = append(limited, s.Name)
+			}
+		}
+		switch route := siteRouteOf(s, f.Local.Proxy.Mode); {
+		case route == "proxy":
+			line += "（經由代理）"
+		case route == "direct" && (f.Local.Proxy.Mode == ProxyEnv || f.Local.Proxy.Mode == ProxyExplicit):
+			line += "（直連）"
 		}
 		l.Evidence = append(l.Evidence, line)
 	}
@@ -763,9 +805,15 @@ func lightSites(f Facts, prev Light, anyReached bool, bad []string, row verdictR
 		l.Status, l.Summary = Yellow, "沒有可測試的網站"
 	case len(bad) == 0:
 		l.Status, l.Summary = Green, fmt.Sprintf("%d/%d 個網站正常", n, n)
+		if len(limited) > 0 {
+			l.Summary += "；「" + strings.Join(limited, "、") + "」連得上但拒絕或限制這次請求"
+		}
 	case anyReached:
 		l.Status = Yellow
 		l.Summary = fmt.Sprintf("%d/%d 個網站正常，「%s」異常", n-len(bad), n, strings.Join(bad, "、"))
+		if len(limited) > 0 {
+			l.Summary += "；「" + strings.Join(limited, "、") + "」連得上但拒絕或限制這次請求"
+		}
 	default:
 		l.Status, l.Summary = Red, cmp.Or(row.Sites, "連不上任何網站")
 	}

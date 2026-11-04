@@ -667,18 +667,167 @@ func TestDecideScenarios(t *testing.T) {
 			},
 		},
 		{
-			name: "沒有設定檢查點",
-			id:   "T14",
-			mod:  func(f *Facts) {},
+			name: "代理例外的網站直連成功、DNS 全部失敗",
+			id:   "T19",
+			mod: func(f *Facts) {
+				f.Local.Proxy = Proxy{Mode: ProxyExplicit, Addr: "10.0.0.8:3128", Bypass: []string{"*"}}
+				f.DNS = failAll(f.DNS, ErrTimeout)
+				f.DNSServers = []Probe{{Target: "192.168.1.1", Err: ErrTimeout}}
+				for i := range f.Sites {
+					f.Sites[i].Route = "direct"
+				}
+			},
+			code: DNSCode,
+			check: func(t *testing.T, r Report) {
+				if strings.Contains(r.Lights[3].Summary, "由代理伺服器代查") {
+					t.Errorf("全部直連時不應說由代理伺服器代查：%q", r.Lights[3].Summary)
+				}
+				if r.Verdict.Code == OK {
+					t.Errorf("結論不應為 OK：%s", r.Verdict.Code)
+				}
+			},
+		},
+		{
+			name: "經由代理的網站成功、DNS 全部失敗",
+			id:   "T19",
+			mod: func(f *Facts) {
+				f.Local.Proxy = Proxy{Mode: ProxyExplicit, Addr: "10.0.0.8:3128"}
+				f.DNS = failAll(f.DNS, ErrTimeout)
+				f.DNSServers = []Probe{{Target: "192.168.1.1", Err: ErrTimeout}}
+				for i := range f.Sites {
+					f.Sites[i].Route = "proxy"
+				}
+			},
 			code: OK,
 			check: func(t *testing.T, r Report) {
-				if len(r.Lights) != 5 {
-					t.Fatalf("燈數 = %d，預期 5", len(r.Lights))
+				if r.Lights[3].Summary != "由代理伺服器代查" {
+					t.Errorf("網址查詢摘要 = %q，預期「由代理伺服器代查」", r.Lights[3].Summary)
 				}
-				for i, want := range []string{"本機網路", "路由器", "對外連線", "網址查詢", "網站連線"} {
-					if r.Lights[i].Name != want {
-						t.Errorf("燈 %d 名稱 = %s，預期 %s", i+1, r.Lights[i].Name, want)
+			},
+		},
+		{
+			name: "設定代理但全部網站直連且都失敗",
+			id:   "T19",
+			mod: func(f *Facts) {
+				f.Local.Proxy = Proxy{Mode: ProxyExplicit, Addr: "10.0.0.8:3128", Bypass: []string{"*"}}
+				f.Direct = failAll(f.Direct, ErrTimeout)
+				f.PublicDNS = failAll(f.PublicDNS, ErrTimeout)
+				f.Sites = failSites(f.Sites, ErrTimeout)
+				for i := range f.Sites {
+					f.Sites[i].Route = "direct"
+				}
+			},
+			code: ISP,
+			check: func(t *testing.T, r Report) {
+				if r.Verdict.Code == ProxyCode {
+					t.Errorf("全部直連時不應判 PROXY：%s", r.Verdict.Code)
+				}
+			},
+		},
+		{
+			name: "經由代理的網站全部失敗",
+			id:   "T19",
+			mod: func(f *Facts) {
+				f.Local.Proxy = Proxy{Mode: ProxyExplicit, Addr: "10.0.0.8:3128"}
+				f.Direct = failAll(f.Direct, ErrTimeout)
+				f.PublicDNS = failAll(f.PublicDNS, ErrTimeout)
+				f.Sites = failSites(f.Sites, ErrTimeout)
+				for i := range f.Sites {
+					f.Sites[i].Route = "proxy"
+				}
+			},
+			code: ProxyCode,
+		},
+		{
+			name: "網站回應 403",
+			id:   "T19",
+			mod: func(f *Facts) {
+				f.Sites[0].Status = 403
+			},
+			code: OK,
+			check: func(t *testing.T, r Report) {
+				if r.Lights[4].Status != Green {
+					t.Errorf("網站連線燈 = %v，預期綠燈", r.Lights[4].Status)
+				}
+				if !strings.Contains(r.Lights[4].Summary, "Google") || !strings.Contains(r.Lights[4].Summary, "連得上但拒絕或限制這次請求") {
+					t.Errorf("摘要應含網站名稱與拒絕說明：%q", r.Lights[4].Summary)
+				}
+				if ev := strings.Join(r.Lights[4].Evidence, "\n"); !strings.Contains(ev, "可能需要登入或權限") {
+					t.Errorf("證據行應含「可能需要登入或權限」：%q", ev)
+				}
+			},
+		},
+		{
+			name: "網站回應 429",
+			id:   "T19",
+			mod: func(f *Facts) {
+				f.Sites[0].Status = 429
+			},
+			code: OK,
+			check: func(t *testing.T, r Report) {
+				if ev := strings.Join(r.Lights[4].Evidence, "\n"); !strings.Contains(ev, "暫時限制請求次數") {
+					t.Errorf("證據行應含「暫時限制請求次數」：%q", ev)
+				}
+			},
+		},
+		{
+			name: "經由代理的網站回應 403",
+			id:   "T19",
+			mod: func(f *Facts) {
+				f.Local.Proxy = Proxy{Mode: ProxyExplicit, Addr: "10.0.0.8:3128"}
+				f.Sites[0].Status = 403
+				f.Sites[0].Route = "proxy"
+			},
+			code: OK,
+			check: func(t *testing.T, r Report) {
+				var line string
+				for _, ev := range r.Lights[4].Evidence {
+					if strings.Contains(ev, "HTTP 403") {
+						line = ev
 					}
+				}
+				if line == "" {
+					t.Fatalf("證據行應含「HTTP 403」：%q", r.Lights[4].Evidence)
+				}
+				i403 := strings.Index(line, "HTTP 403")
+				iperm := strings.Index(line, "可能需要登入或權限")
+				iproxy := strings.Index(line, "（經由代理）")
+				if !(i403 < iperm && iperm < iproxy) {
+					t.Errorf("證據行順序應為 HTTP 403 → 拒絕說明 → （經由代理）：%q", line)
+				}
+			},
+		},
+		{
+			name: "PAC、網站成功、DNS 全部失敗",
+			id:   "T19",
+			mod: func(f *Facts) {
+				f.Local.Proxy = Proxy{Mode: ProxyPAC, Addr: "http://wpad/wpad.dat"}
+				f.DNS = failAll(f.DNS, ErrTimeout)
+				f.DNSServers = []Probe{{Target: "192.168.1.1", Err: ErrTimeout}}
+			},
+			code: DNSCode,
+			check: func(t *testing.T, r Report) {
+				if strings.Contains(r.Lights[3].Summary, "由代理伺服器代查") {
+					t.Errorf("PAC 不應說由代理伺服器代查：%q", r.Lights[3].Summary)
+				}
+			},
+		},
+		{
+			name: "設定代理但網站都直連",
+			id:   "T19",
+			mod: func(f *Facts) {
+				f.Local.Proxy = Proxy{Mode: ProxyExplicit, Addr: "10.0.0.8:3128", Bypass: []string{"*"}}
+				for i := range f.Sites {
+					f.Sites[i].Route = "direct"
+				}
+			},
+			code: OK,
+			check: func(t *testing.T, r Report) {
+				if !strings.Contains(r.Lights[2].Summary, "設定了代理，但測試的網站都直連") {
+					t.Errorf("對外連線摘要應含直連說明：%q", r.Lights[2].Summary)
+				}
+				if strings.Contains(r.Lights[2].Summary, "經由代理") {
+					t.Errorf("對外連線摘要不應含「經由代理」：%q", r.Lights[2].Summary)
 				}
 			},
 		},

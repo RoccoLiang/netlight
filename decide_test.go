@@ -404,12 +404,12 @@ func TestRouteEvidence(t *testing.T) {
 		}}), true, []string{
 			"路由追蹤（往 1.1.1.1）：1. 192.168.1.1（路由器） → * → 3. 10.1.0.1（單位防火牆） → 4. 203.0.113.9 → 5. 1.1.1.1（抵達）",
 		}},
-		{"不通時指出最後回應的節點", base(RouteResult{Target: "1.1.1.1", Hops: []Hop{
+		{"不通時指出最後有回應的節點", base(RouteResult{Target: "1.1.1.1", Hops: []Hop{
 			{TTL: 1, IP: "192.168.1.1", Ms: 2},
 			{TTL: 3, IP: "10.1.0.1", Ms: 5},
 		}}), false, []string{
 			"路由追蹤（往 1.1.1.1）：1. 192.168.1.1（路由器） → * → 3. 10.1.0.1（單位防火牆）",
-			"最後回應的節點：第 3 站 10.1.0.1（單位防火牆）",
+			"最後有回應的節點：第 3 站 10.1.0.1（單位防火牆）",
 		}},
 		{"不通但已抵達目標時不指出最後節點", base(RouteResult{Target: "1.1.1.1", Hops: []Hop{
 			{TTL: 1, IP: "192.168.1.1", Ms: 2},
@@ -444,5 +444,26 @@ func TestRouteEvidence(t *testing.T) {
 				t.Errorf("routeEvidence = %q，預期 %q", got, c.want)
 			}
 		})
+	}
+}
+
+func TestSiteRouteOf(t *testing.T) {
+	s := Site{Name: "Google", Route: "direct"}
+	if got := siteRouteOf(s, ProxyExplicit); got != "direct" {
+		t.Errorf("有值時應回傳原值，得到 %q", got)
+	}
+	cases := []struct {
+		mode ProxyMode
+		want string
+	}{
+		{ProxyEnv, "proxy"},
+		{ProxyExplicit, "proxy"},
+		{ProxyPAC, "pac"},
+		{ProxyNone, "direct"},
+	}
+	for _, c := range cases {
+		if got := siteRouteOf(Site{}, c.mode); got != c.want {
+			t.Errorf("缺漏時 mode=%v 應推定為 %q，得到 %q", c.mode, c.want, got)
+		}
 	}
 }

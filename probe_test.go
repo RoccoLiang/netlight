@@ -95,6 +95,43 @@ func TestSiteProbe(t *testing.T) {
 	}
 }
 
+func TestSiteRoute(t *testing.T) {
+	for _, k := range []string{"HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy"} {
+		t.Setenv(k, "")
+	}
+	cases := []struct {
+		name   string
+		px     Proxy
+		rawURL string
+		env    map[string]string
+		want   string
+	}{
+		{name: "無代理直連", px: Proxy{}, rawURL: "https://www.google.com", want: "direct"},
+		{name: "PAC 未執行、實際直連", px: Proxy{Mode: ProxyPAC, Addr: "http://wpad/wpad.dat"}, rawURL: "https://www.google.com", want: "pac"},
+		{name: "明確代理", px: Proxy{Mode: ProxyExplicit, Addr: "10.0.0.8:3128"}, rawURL: "https://www.google.com", want: "proxy"},
+		{name: "明確代理但命中例外", px: Proxy{Mode: ProxyExplicit, Addr: "10.0.0.8:3128", Bypass: []string{"*.corp.example"}}, rawURL: "https://erp.corp.example", want: "direct"},
+		{name: "無法解析的網址", px: Proxy{Mode: ProxyExplicit, Addr: "10.0.0.8:3128"}, rawURL: "://bad", want: ""},
+		{name: "只設 HTTP_PROXY 時 https 直連", px: Proxy{Mode: ProxyEnv}, rawURL: "https://www.google.com",
+			env: map[string]string{"HTTP_PROXY": "http://127.0.0.1:7998"}, want: "direct"},
+		{name: "設 HTTPS_PROXY 時走代理", px: Proxy{Mode: ProxyEnv}, rawURL: "https://www.google.com",
+			env: map[string]string{"HTTP_PROXY": "http://127.0.0.1:7998", "HTTPS_PROXY": "http://127.0.0.1:7999"}, want: "proxy"},
+		{name: "NO_PROXY 命中直連", px: Proxy{Mode: ProxyEnv}, rawURL: "https://erp.corp.example",
+			env: map[string]string{"HTTPS_PROXY": "http://127.0.0.1:7999", "NO_PROXY": "*.corp.example"}, want: "direct"},
+		{name: "localhost 直連", px: Proxy{Mode: ProxyEnv}, rawURL: "https://localhost/",
+			env: map[string]string{"HTTPS_PROXY": "http://127.0.0.1:7999"}, want: "direct"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			for k, v := range c.env {
+				t.Setenv(k, v)
+			}
+			if got := siteRoute(c.px, c.rawURL); got != c.want {
+				t.Errorf("siteRoute = %q，預期 %q", got, c.want)
+			}
+		})
+	}
+}
+
 func TestCaptiveCheck(t *testing.T) {
 	serverTime := time.Now().Add(-72 * time.Hour) // 登入頁的錯誤時鐘
 	portal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

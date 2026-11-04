@@ -83,7 +83,7 @@ func routeMapLines(f Facts, internetDown bool) []string {
 		}
 	}
 	if internetDown && !f.Route.Hops[last].Reached {
-		lines[len(lines)-1] += "  ◀ 最後回應"
+		lines[len(lines)-1] += "  ◀ 最後有回應的節點"
 	}
 	return lines
 }

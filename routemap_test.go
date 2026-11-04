@@ -281,7 +281,7 @@ func TestRouteMapLines(t *testing.T) {
 			want: []string{
 				"├ 1. 192.168.1.1（路由器）",
 				"┊",
-				"└ 3. 198.51.100.7  ◀ 最後回應",
+				"└ 3. 198.51.100.7  ◀ 最後有回應的節點",
 			},
 		},
 		{
@@ -371,7 +371,7 @@ func TestRenderMapRouteBroken(t *testing.T) {
 	renderMap(&b, lights, false, routeMapLines(f, true))
 	lines := splitMapLines(t, b.String())
 
-	// 每一條分支行（含 TTL 缺口的「┊」行）前綴都是「  ┆   」，最後一行含「◀ 最後回應」
+	// 每一條分支行（含 TTL 缺口的「┊」行）前綴都是「  ┆   」，最後一行含「◀ 最後有回應的節點」
 	branchLines := 0
 	lastBranch := ""
 	for _, ln := range lines {
@@ -392,8 +392,8 @@ func TestRenderMapRouteBroken(t *testing.T) {
 	if !gap {
 		t.Errorf("TTL 缺口應有一行「  ┆   ┊」")
 	}
-	if !strings.Contains(lastBranch, "◀ 最後回應") {
-		t.Errorf("最後一行分支行應含「◀ 最後回應」：%q", lastBranch)
+	if !strings.Contains(lastBranch, "◀ 最後有回應的節點") {
+		t.Errorf("最後一行分支行應含「◀ 最後有回應的節點」：%q", lastBranch)
 	}
 
 	// 「◀ 斷在這裡」仍只出現一次、在「對外連線」站行
