@@ -782,18 +782,34 @@ func TestSafeVerdictText(t *testing.T) {
 	}
 	cfgR := Config{ReplaceDefaultTargets: true, Targets: []Target{{Name: "內網 A", URL: "https://a.internal"}, {Name: "內網 B", URL: "https://b.internal"}}}
 	repR := decide(fr, cfgR)
-	if repR.Verdict.Code == SiteCode {
-		if got, want := safeVerdictText(repR, fr, cfgR), fmt.Sprintf(verdicts[SiteCode].Text, "設定檔第 2 個網站"); got != want {
-			t.Errorf("取代預設網站：%q，應為 %q", got, want)
-		}
+	if repR.Verdict.Code != SiteCode {
+		t.Fatalf("取代預設網站：預期 SITE，得到 %s", repR.Verdict.Code)
+	}
+	if got, want := safeVerdictText(repR, fr, cfgR), fmt.Sprintf(verdicts[SiteCode].Text, "設定檔第 2 個網站"); got != want {
+		t.Errorf("取代預設網站：%q，應為 %q", got, want)
 	}
 
-	// SITE_DNS 變體用自己的範本
-	dnsRep := Report{Verdict: Verdict{Code: SiteCode, Text: fmt.Sprintf(verdicts[siteDNS].Text, "ERP」惡意")}}
+	// SITE_DNS 變體（由 decide 實際產生）用自己的範本
 	fd := healthy()
+	fd.DNS = append(fd.DNS, Probe{Target: "erp.internal", Err: ErrDNS})
 	fd.Sites = append(fd.Sites, Site{Name: "ERP」惡意", Probe: Probe{Target: "https://erp.internal", Err: ErrDNS}})
-	if got, want := safeVerdictText(dnsRep, fd, Config{}), fmt.Sprintf(verdicts[siteDNS].Text, "設定檔第 1 個網站"); got != want {
+	cfgD := Config{Targets: []Target{{Name: "ERP」惡意", URL: "https://erp.internal"}}}
+	repD := decide(fd, cfgD)
+	if p, _, _ := strings.Cut(verdicts[siteDNS].Text, "%s"); repD.Verdict.Code != SiteCode || !strings.HasPrefix(repD.Verdict.Text, p) {
+		t.Fatalf("預期 SITE_DNS 變體，得到 %s：%q", repD.Verdict.Code, repD.Verdict.Text)
+	}
+	if got, want := safeVerdictText(repD, fd, cfgD), fmt.Sprintf(verdicts[siteDNS].Text, "設定檔第 1 個網站"); got != want {
 		t.Errorf("SITE_DNS：%q，應為 %q", got, want)
+	}
+
+	// 反向偽造：一般 SITE 的網站名稱含 SITE_DNS 的整段開頭，也不能讓摘要改用 SITE_DNS 範本
+	dnsPrefix, _, _ := strings.Cut(verdicts[siteDNS].Text, "%s")
+	ff := healthy()
+	ff.Sites = append(ff.Sites, Site{Name: dnsPrefix + "假", Probe: Probe{Target: "https://x.example", Err: ErrTimeout}})
+	cfgF := Config{Targets: []Target{{Name: dnsPrefix + "假", URL: "https://x.example"}}}
+	repF := decide(ff, cfgF)
+	if got, want := safeVerdictText(repF, ff, cfgF), fmt.Sprintf(verdicts[SiteCode].Text, "設定檔第 1 個網站"); got != want {
+		t.Errorf("偽造 SITE_DNS 開頭：%q，應為 %q", got, want)
 	}
 
 	// 非 SITE 原樣保留；作業系統名稱只用固定值

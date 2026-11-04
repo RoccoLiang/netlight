@@ -405,7 +405,7 @@ func webReportText(rep Report, f Facts, now time.Time) string {
 	var b strings.Builder
 	fmt.Fprintln(&b, "【netlight 網路診斷回報】")
 	fmt.Fprintf(&b, "時間：%s 台灣標準時間\n", now.Format("2006-01-02 15:04"))
-	fmt.Fprintf(&b, "版本：netlight v%s · %s\n", version, safeOSName(f.Local.OS))
+	fmt.Fprintf(&b, "版本：netlight v%s · %s\n", version, f.Local.OS)
 	fmt.Fprintf(&b, "結論碼：%s\n", rep.Verdict.Code)
 	render(&b, rep, f.Local.OS, now, renderMode{Detail: true})
 	return b.String()
