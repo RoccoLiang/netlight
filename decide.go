@@ -449,6 +449,15 @@ func decide(f Facts, cfg Config) Report {
 	return Report{Lights: L, Verdict: v}
 }
 
+// lightNames：依設定回傳燈號名稱（與 decide() 的燈號順序相同）
+func lightNames(cfg Config) []string {
+	names := []string{"本機網路", "路由器", "對外連線", "網址查詢", "網站連線"}
+	if len(cfg.Checkpoints) > 0 {
+		names = slices.Insert(names, 2, "單位網路")
+	}
+	return names
+}
+
 func probeEvidence(ps []Probe) []string {
 	var ev []string
 	for _, p := range ps {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -327,6 +328,41 @@ func TestDecidePACWording(t *testing.T) {
 	v := decide(f, Config{}).Verdict
 	if v.Code != ProxyPACCode || !strings.Contains(v.Text, "PAC") || !strings.Contains(v.Action, "網路業者") {
 		t.Errorf("PAC 結論應說明無法確定並提到業者：%+v", v)
+	}
+}
+
+func TestLightNames(t *testing.T) {
+	want := []string{"本機網路", "路由器", "對外連線", "網址查詢", "網站連線"}
+	if got := lightNames(Config{}); !slices.Equal(got, want) {
+		t.Errorf("lightNames(Config{}) = %v，應為 %v", got, want)
+	}
+
+	cfg := Config{Checkpoints: []Checkpoint{{Name: "單位防火牆", Host: "10.1.0.1", Check: "tcp:443"}}}
+	got := lightNames(cfg)
+	if len(got) != 6 || got[2] != "單位網路" {
+		t.Errorf("有一個檢查點時 lightNames = %v，應為 6 盞且第 3 盞為「單位網路」", got)
+	}
+
+	// 一致性：decide() 各盞燈的名稱依序等於 lightNames(cfg)
+	f := healthy()
+	rep := decide(f, Config{})
+	if len(rep.Lights) != len(want) {
+		t.Fatalf("沒有檢查點時燈數 = %d，應為 %d", len(rep.Lights), len(want))
+	}
+	for i, l := range rep.Lights {
+		if l.Name != want[i] {
+			t.Errorf("沒有檢查點時燈 %d 名稱 = %q，應為 %q", i+1, l.Name, want[i])
+		}
+	}
+	f.Checkpoints = []CheckpointResult{{Name: "單位防火牆", Host: "10.1.0.1", Check: "tcp:443", OK: true}}
+	rep = decide(f, cfg)
+	if len(rep.Lights) != len(got) {
+		t.Fatalf("有一個檢查點時燈數 = %d，應為 %d", len(rep.Lights), len(got))
+	}
+	for i, l := range rep.Lights {
+		if l.Name != got[i] {
+			t.Errorf("有一個檢查點時燈 %d 名稱 = %q，應為 %q", i+1, l.Name, got[i])
+		}
 	}
 }
 

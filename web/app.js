@@ -5,23 +5,16 @@
 	var STATE_TEXT = { green: "正常", yellow: "注意", red: "故障", skip: "略過" };
 	var MARK_CHAR = { green: "✓", yellow: "!", red: "✕", skip: "–" };
 
-	// stage 事件與燈的對應：「網址查詢」要 dns 與 public_dns 都完成、「網站連線」要 sites 與 captive 都完成
-	var STAGE_LIGHTS = {
-		local: 0,
-		gateway: 1,
-		direct: 2,
-		dns: 3,
-		public_dns: 3,
-		sites: 4,
-		captive: 4
+	// 各燈需要哪些 stage 都完成才轉為「已完成，判斷中」
+	var LIGHT_NEEDS = {
+		"本機網路": ["local"],
+		"路由器": ["gateway"],
+		"單位網路": ["checkpoints"],
+		"對外連線": ["direct"],
+		"網址查詢": ["dns", "public_dns"],
+		"網站連線": ["sites", "captive"]
 	};
-	var LIGHT_STAGES = [
-		["local"],
-		["gateway"],
-		["direct"],
-		["dns", "public_dns"],
-		["sites", "captive"]
-	];
+	var DEFAULT_NAMES = ["本機網路", "路由器", "對外連線", "網址查詢", "網站連線"];
 
 	var runBtn = document.getElementById("run");
 	var copyBtn = document.getElementById("copy");
@@ -35,13 +28,40 @@
 	var mainEl = document.getElementById("main");
 	var endedEl = document.getElementById("ended");
 
+	var lightsEl = document.getElementById("lights");
 	var lights = [];
-	for (var i = 0; i < 5; i++) {
-		lights.push({
-			mark: document.getElementById("mark-" + i),
-			status: document.getElementById("status-" + i),
-			summary: document.getElementById("summary-" + i)
-		});
+
+	// buildRows：依燈名建立燈號列（結構與原本的靜態 <li> 相同）
+	function buildRows(names) {
+		lights = [];
+		lightsEl.textContent = "";
+		for (var i = 0; i < names.length; i++) {
+			var li = document.createElement("li");
+			var mark = document.createElement("span");
+			mark.className = "mark mark-pending";
+			mark.setAttribute("aria-hidden", "true");
+			mark.textContent = "○";
+			var body = document.createElement("span");
+			body.className = "light-body";
+			var line = document.createElement("span");
+			line.className = "light-line";
+			var name = document.createElement("span");
+			name.className = "light-name";
+			name.textContent = names[i];
+			var status = document.createElement("span");
+			status.className = "light-status";
+			status.textContent = "等待中";
+			line.appendChild(name);
+			line.appendChild(status);
+			var summary = document.createElement("span");
+			summary.className = "light-summary";
+			body.appendChild(line);
+			body.appendChild(summary);
+			li.appendChild(mark);
+			li.appendChild(body);
+			lightsEl.appendChild(li);
+			lights.push({ name: names[i], mark: mark, status: status, summary: summary });
+		}
 	}
 
 	// 頁面識別：每次載入重新產生，用於心跳與關閉通知的亂序防護
@@ -73,7 +93,7 @@
 	}
 
 	function setPending() {
-		for (var i = 0; i < 5; i++) {
+		for (var i = 0; i < lights.length; i++) {
 			var l = lights[i];
 			l.mark.textContent = "○";
 			l.mark.className = "mark mark-pending";
@@ -83,7 +103,7 @@
 	}
 
 	function setChecking() {
-		for (var i = 0; i < 5; i++) {
+		for (var i = 0; i < lights.length; i++) {
 			var l = lights[i];
 			l.mark.textContent = "○";
 			l.mark.className = "mark mark-checking";
@@ -94,21 +114,26 @@
 
 	// 對應的探測完成後，該盞燈轉為「已完成，判斷中」（不經 aria-live 播報，避免太吵）
 	function markStageDone(stage) {
-		var i = STAGE_LIGHTS[stage];
-		if (i === undefined) {
-			return;
-		}
 		stageSeen[stage] = true;
-		var need = LIGHT_STAGES[i];
-		for (var n = 0; n < need.length; n++) {
-			if (!stageSeen[need[n]]) {
-				return;
+		for (var i = 0; i < lights.length; i++) {
+			var need = LIGHT_NEEDS[lights[i].name];
+			if (!need || need.indexOf(stage) < 0) {
+				continue;
+			}
+			var done = true;
+			for (var n = 0; n < need.length; n++) {
+				if (!stageSeen[need[n]]) {
+					done = false;
+					break;
+				}
+			}
+			if (done) {
+				var l = lights[i];
+				l.mark.textContent = "●";
+				l.mark.className = "mark mark-stage-done";
+				l.status.textContent = "已完成，判斷中";
 			}
 		}
-		var l = lights[i];
-		l.mark.textContent = "●";
-		l.mark.className = "mark mark-stage-done";
-		l.status.textContent = "已完成，判斷中";
 	}
 
 	function setButtons() {
@@ -122,7 +147,21 @@
 		hasResult = true;
 		var result = data && data.result ? data.result : {};
 		var lightsData = result.lights || [];
-		for (var i = 0; i < 5; i++) {
+		// 回報的燈號與目前各列不同時，先以回報的名稱重建，避免錯位
+		var same = lightsData.length === lights.length;
+		for (var i = 0; same && i < lightsData.length; i++) {
+			if ((lightsData[i] || {}).name !== lights[i].name) {
+				same = false;
+			}
+		}
+		if (!same) {
+			var names = [];
+			for (var j = 0; j < lightsData.length; j++) {
+				names.push((lightsData[j] || {}).name || "");
+			}
+			buildRows(names);
+		}
+		for (var i = 0; i < lights.length; i++) {
 			var l = lightsData[i] || {};
 			setLight(i, l.status, l.summary);
 		}
@@ -354,6 +393,23 @@
 	runBtn.addEventListener("click", startRun);
 	copyBtn.addEventListener("click", copyReport);
 	byeBtn.addEventListener("click", endProgram);
+
+	// 啟動：先以預設燈名建立各列，再向伺服器取得設定中的燈名（失敗時維持預設，不顯示錯誤）
+	buildRows(DEFAULT_NAMES);
+	fetch("api/layout").then(function (res) {
+		if (!res.ok) {
+			return null;
+		}
+		return res.json();
+	}).then(function (data) {
+		var names = data && data.lights;
+		if (!Array.isArray(names) || names.length === 0 || !names.every(function (n) { return typeof n === "string"; })) {
+			return;
+		}
+		if (!running && !hasResult) {
+			buildRows(names);
+		}
+	}).catch(function () {});
 
 	beat();
 	beatTimer = setInterval(beat, 10000);

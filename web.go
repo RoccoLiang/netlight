@@ -268,7 +268,7 @@ func webMain(cfgPath string, auto bool) int {
 // webMethod：路徑對應的唯一允許方法；空字串表示路徑不存在
 func webMethod(rest string) string {
 	switch rest {
-	case "", "app.js", "app.css":
+	case "", "app.js", "app.css", "api/layout":
 		return http.MethodGet
 	case "api/run", "api/heartbeat", "api/bye", "api/shutdown":
 		return http.MethodPost
@@ -325,6 +325,13 @@ func newWebHandler(cfg Config, token, host string, st *webState, done func()) ht
 			}
 			w.Header().Set("Content-Type", webTypes[name])
 			_, _ = w.Write(b)
+		case "api/layout":
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			enc := json.NewEncoder(w)
+			enc.SetEscapeHTML(false)
+			_ = enc.Encode(struct {
+				Lights []string `json:"lights"`
+			}{lightNames(cfg)})
 		case "api/run":
 			if !runMu.TryLock() {
 				http.Error(w, "已有一個檢查正在進行", http.StatusConflict)

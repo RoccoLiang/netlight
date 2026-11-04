@@ -16,43 +16,7 @@
 		<button type="button" id="run" class="primary">開始檢查</button>
 	</p>
 
-	<ul class="lights" aria-label="五盞燈檢查結果">
-		<li>
-			<span class="mark mark-pending" id="mark-0" aria-hidden="true">○</span>
-			<span class="light-body">
-				<span class="light-line"><span class="light-name">本機網路</span><span class="light-status" id="status-0">等待中</span></span>
-				<span class="light-summary" id="summary-0"></span>
-			</span>
-		</li>
-		<li>
-			<span class="mark mark-pending" id="mark-1" aria-hidden="true">○</span>
-			<span class="light-body">
-				<span class="light-line"><span class="light-name">路由器</span><span class="light-status" id="status-1">等待中</span></span>
-				<span class="light-summary" id="summary-1"></span>
-			</span>
-		</li>
-		<li>
-			<span class="mark mark-pending" id="mark-2" aria-hidden="true">○</span>
-			<span class="light-body">
-				<span class="light-line"><span class="light-name">對外連線</span><span class="light-status" id="status-2">等待中</span></span>
-				<span class="light-summary" id="summary-2"></span>
-			</span>
-		</li>
-		<li>
-			<span class="mark mark-pending" id="mark-3" aria-hidden="true">○</span>
-			<span class="light-body">
-				<span class="light-line"><span class="light-name">網址查詢</span><span class="light-status" id="status-3">等待中</span></span>
-				<span class="light-summary" id="summary-3"></span>
-			</span>
-		</li>
-		<li>
-			<span class="mark mark-pending" id="mark-4" aria-hidden="true">○</span>
-			<span class="light-body">
-				<span class="light-line"><span class="light-name">網站連線</span><span class="light-status" id="status-4">等待中</span></span>
-				<span class="light-summary" id="summary-4"></span>
-			</span>
-		</li>
-	</ul>
+	<ul class="lights" id="lights" aria-label="燈號檢查結果"></ul>
 
 	<section class="result" aria-live="polite">
 		<h2>結論</h2>

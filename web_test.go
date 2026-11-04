@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -107,6 +108,66 @@ func TestWebStaticFiles(t *testing.T) {
 		if w.Body.Len() == 0 {
 			t.Errorf("GET %s 內容為空", tc.path)
 		}
+		if tc.path == "/" && !strings.Contains(w.Body.String(), `id="lights"`) {
+			t.Errorf("index.html 應含 id=\"lights\"（燈號列由 app.js 動態建立）")
+		}
+	}
+}
+
+func TestWebLayout(t *testing.T) {
+	h := newWebHandler(Config{}, testToken, testHost, newTestState(), func() {})
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, webReq(http.MethodGet, "/t/"+testToken+"/api/layout"))
+	if w.Code != http.StatusOK {
+		t.Fatalf("api/layout 應 200，得到 %d：%s", w.Code, w.Body.String())
+	}
+	checkWebHeaders(t, w.Header())
+	if ct := w.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Errorf("Content-Type = %q，應含 application/json", ct)
+	}
+	var got struct {
+		Lights []string `json:"lights"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("解析 JSON 失敗：%v", err)
+	}
+	if len(got.Lights) != 5 {
+		t.Errorf("沒有檢查點時 lights = %v，應為 5 盞", got.Lights)
+	}
+
+	cfg := Config{Checkpoints: []Checkpoint{{Name: "單位防火牆", Host: "10.1.0.1", Check: "tcp:443"}}}
+	h = newWebHandler(cfg, testToken, testHost, newTestState(), func() {})
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, webReq(http.MethodGet, "/t/"+testToken+"/api/layout"))
+	if w.Code != http.StatusOK {
+		t.Fatalf("api/layout 應 200，得到 %d：%s", w.Code, w.Body.String())
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("解析 JSON 失敗：%v", err)
+	}
+	if len(got.Lights) != 6 || got.Lights[2] != "單位網路" {
+		t.Errorf("有檢查點時 lights = %v，應為 6 盞且第 3 盞為「單位網路」", got.Lights)
+	}
+}
+
+// TestWebAppLightNeeds：app.js 的燈號—stage 對應涵蓋設定中的每個燈名
+func TestWebAppLightNeeds(t *testing.T) {
+	b, err := fs.ReadFile(webDir, "app.js")
+	if err != nil {
+		t.Fatalf("讀取 app.js 失敗：%v", err)
+	}
+	js := string(b)
+	cfg := Config{Checkpoints: []Checkpoint{{Name: "單位防火牆", Host: "10.1.0.1", Check: "tcp:443"}}}
+	for _, name := range lightNames(cfg) {
+		if !strings.Contains(js, "\""+name+"\": [") {
+			t.Errorf("app.js 的 LIGHT_NEEDS 缺少 %q 條目", name)
+		}
+	}
+	if !strings.Contains(js, "api/layout") {
+		t.Error("app.js 應呼叫 api/layout 取得燈名")
+	}
+	if strings.Contains(js, "STAGE_LIGHTS") {
+		t.Error("app.js 不應再使用 STAGE_LIGHTS")
 	}
 }
 
@@ -620,6 +681,11 @@ func TestWebMethodNotAllowed(t *testing.T) {
 	}
 	w = httptest.NewRecorder()
 	h.ServeHTTP(w, webReq(http.MethodPost, "/t/"+testToken+"/"))
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("方法不符應 405，得到 %d", w.Code)
+	}
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, webReq(http.MethodPost, "/t/"+testToken+"/api/layout"))
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("方法不符應 405，得到 %d", w.Code)
 	}
