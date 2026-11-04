@@ -158,7 +158,7 @@ go test ./... -update        # 重新產生 testdata/*.golden
 ./build.sh v1.2.0            # 交叉編譯並打包到 dist/（各平台執行檔、zip／tar.gz、SHA256SUMS）
 ```
 
-發版：把`v*`格式的tag推送到GitHub（`git push github <tag>`），GitHub Actions會自動建置、附上建置來源證明並建立release；推送到Gitea不會觸發這個流程。變更紀錄見 [CHANGELOG.md](CHANGELOG.md)，安全問題回報方式見 [SECURITY.md](SECURITY.md)。
+發版：把`v*`格式的tag推送到GitHub（`git push github <tag>`），GitHub Actions會自動建置、附上建置來源證明並建立release。推送到Gitea不會觸發這個流程；Gitea的release另外以API建立，檔案與GitHub release相同（可用SHA256SUMS核對）。變更紀錄見 [CHANGELOG.md](CHANGELOG.md)，安全問題回報方式見 [SECURITY.md](SECURITY.md)。
 
 設計參考了 [heymaikol/network-doctor](https://github.com/heymaikol/network-doctor)（Apache-2.0）的分層診斷概念，程式碼為獨立撰寫。
 
