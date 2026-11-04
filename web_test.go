@@ -736,6 +736,24 @@ func TestWebReportText(t *testing.T) {
 	}
 }
 
+// TestSafeLabel：safeLabel 只遮蔽看起來像位址的片段，一般名稱原樣保留
+func TestSafeLabel(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"公司 ERP", "公司 ERP"},
+		{"Google", "Google"},
+		{"erp.internal", "（已隱藏）"},
+		{"10.1.2.3", "（已隱藏）"},
+		{"https://erp.example.com/a", "（已隱藏）"},
+		{"fe80::1", "（已隱藏）"},
+		{"「erp.internal」本身異常", "「（已隱藏）」本身異常"},
+	}
+	for _, tc := range cases {
+		if got := safeLabel(tc.in); got != tc.want {
+			t.Errorf("safeLabel(%q) = %q，應為 %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestWebSafeReportText(t *testing.T) {
 	ipRe := regexp.MustCompile(`\b(\d{1,3}\.){3}\d{1,3}\b`)
 	now := time.Date(2026, 11, 2, 6, 3, 0, 0, time.UTC)
@@ -751,7 +769,7 @@ func TestWebSafeReportText(t *testing.T) {
 		"燈號：本機網路 正常｜路由器 正常｜對外連線 正常｜網址查詢 正常｜網站連線 正常\n" +
 		"結論：網路正常。\n" +
 		"建議：如果某個 App 還是不能用，可能是該服務本身異常，請稍後再試。\n" +
-		"（這份摘要不含你的 IP、內部網址與技術細節；資訊人員需要時，請另外提供完整技術資料。）\n"
+		"（這份摘要不含這台電腦的 IP、網址與技術細節；資訊人員需要時，請另外提供完整技術資料。）\n"
 	if text != want {
 		t.Errorf("安全摘要 =\n%s\n應為\n%s", text, want)
 	}
@@ -774,6 +792,21 @@ func TestWebSafeReportText(t *testing.T) {
 	}
 	if proxyText := webSafeReportText(repProxy, fp.Local.OS, now); strings.Contains(proxyText, "10.0.0.8") {
 		t.Errorf("代理情境的安全摘要不得含代理位址 10.0.0.8：\n%s", proxyText)
+	}
+
+	// 網站名稱被填成內部主機名稱：SITE 結論的這個名稱要隱藏，完整回報保留
+	fe := healthy()
+	fe.Sites = append(fe.Sites, Site{Name: "erp.internal", Probe: Probe{Target: "https://erp.example.com", Err: ErrTimeout}})
+	repSite := decide(fe, Config{})
+	siteText := webSafeReportText(repSite, fe.Local.OS, now)
+	if strings.Contains(siteText, "erp.internal") {
+		t.Errorf("網站名稱為內部主機名稱時，安全摘要不得含 erp.internal：\n%s", siteText)
+	}
+	if !strings.Contains(siteText, "（已隱藏）") {
+		t.Errorf("網站名稱為內部主機名稱時，安全摘要應含「（已隱藏）」：\n%s", siteText)
+	}
+	if full := webReportText(repSite, fe, now); !strings.Contains(full, "erp.internal") {
+		t.Errorf("完整回報仍應含網站名稱 erp.internal：\n%s", full)
 	}
 
 	// 有聯絡窗口：Org 非空時列出單位，Org 空時只列聯絡
@@ -801,17 +834,32 @@ func TestWebAppSafeCopy(t *testing.T) {
 		t.Fatalf("讀取 app.js 失敗：%v", err)
 	}
 	js := string(b)
-	for _, want := range []string{"data.safe_text", "copy-full", "copyText("} {
+	for _, want := range []string{"data.safe_text", "copy-full", "copyText(", "copyText(safeText", "copyText(reportText"} {
 		if !strings.Contains(js, want) {
 			t.Errorf("app.js 缺少 %q", want)
 		}
+	}
+	// 「複製回報給 IT」只複製安全摘要：copyReport 本體用 safeText，不得用 reportText
+	i := strings.Index(js, "function copyReport()")
+	if i < 0 {
+		t.Fatalf("app.js 找不到 copyReport 函式")
+	}
+	body := js[i:]
+	if j := strings.Index(body, "\n\t}"); j >= 0 {
+		body = body[:j]
+	}
+	if !strings.Contains(body, "safeText") {
+		t.Errorf("copyReport 本體應使用 safeText：\n%s", body)
+	}
+	if strings.Contains(body, "reportText") {
+		t.Errorf("copyReport 本體不得使用 reportText：\n%s", body)
 	}
 	h, err := fs.ReadFile(webDir, "index.html")
 	if err != nil {
 		t.Fatalf("讀取 index.html 失敗：%v", err)
 	}
 	html := string(h)
-	for _, want := range []string{`id="copy-full"`, "copy-hint"} {
+	for _, want := range []string{`id="copy-full"`, "copy-hint", "不含這台電腦的 IP、網址與技術細節"} {
 		if !strings.Contains(html, want) {
 			t.Errorf("index.html 缺少 %q", want)
 		}

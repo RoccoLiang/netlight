@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -411,6 +412,19 @@ func webReportText(rep Report, f Facts, now time.Time) string {
 	return b.String()
 }
 
+// safeLabelRe：看起來像位址的片段（IPv4、含 :// 的網址、含冒號的 IPv6 片段、帶點的主機名稱）。
+// 網址的比對到下一個空白或全形標點（含「」）為止。
+var safeLabelRe = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b` +
+	`|[A-Za-z][A-Za-z0-9+.-]*://[^\s「」『』（）〈〉《》【】、。，；：？！…・]+` +
+	`|[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,}` +
+	`|\b[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\b`)
+
+// safeLabel：把看起來像位址的文字換成「（已隱藏）」，一般名稱原樣保留。
+// 只用於設定檔可能填入位址的欄位（網站名稱）；程式固定文字與聯絡資訊不套用。
+func safeLabel(s string) string {
+	return safeLabelRe.ReplaceAllString(s, "（已隱藏）")
+}
+
 // webSafeReportText：可放心貼到群組的回報摘要（不含燈號說明、技術證據、IP 與網址）
 func webSafeReportText(rep Report, osName string, now time.Time) string {
 	now = now.In(webTPE)
@@ -424,7 +438,7 @@ func webSafeReportText(rep Report, osName string, now time.Time) string {
 		rows[i] = l.Name + " " + statusWord[l.Status]
 	}
 	fmt.Fprintf(&b, "燈號：%s\n", strings.Join(rows, "｜"))
-	fmt.Fprintf(&b, "結論：%s\n", rep.Verdict.Text)
+	fmt.Fprintf(&b, "結論：%s\n", safeLabel(rep.Verdict.Text))
 	fmt.Fprintf(&b, "建議：%s\n", rep.Verdict.Action)
 	if rep.Verdict.Contact != "" {
 		if rep.Verdict.Org != "" {
@@ -433,6 +447,6 @@ func webSafeReportText(rep Report, osName string, now time.Time) string {
 			fmt.Fprintf(&b, "聯絡：%s\n", rep.Verdict.Contact)
 		}
 	}
-	fmt.Fprintln(&b, "（這份摘要不含你的 IP、內部網址與技術細節；資訊人員需要時，請另外提供完整技術資料。）")
+	fmt.Fprintln(&b, "（這份摘要不含這台電腦的 IP、網址與技術細節；資訊人員需要時，請另外提供完整技術資料。）")
 	return b.String()
 }
