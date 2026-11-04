@@ -14,6 +14,20 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// pollTimeout：每次輪詢最多等 100ms，且不超過 ctx 剩餘時間（至少 1ms）
+func pollTimeout(ctx context.Context) int {
+	timeout := 100
+	if dl, ok := ctx.Deadline(); ok {
+		if remain := int(time.Until(dl).Milliseconds()); remain < timeout {
+			timeout = remain
+		}
+	}
+	if timeout < 1 {
+		timeout = 1
+	}
+	return timeout
+}
+
 // traceRoute：Linux 的非特權 ICMP DGRAM socket 收不到 Time Exceeded 的一般讀取，
 // 必須設定 IP_RECVERR 再以 MSG_ERRQUEUE 讀錯誤佇列；每個 TTL 一個 socket 平行處理
 func traceRoute(ctx context.Context, target string, maxHops int) ([]Hop, error) {
@@ -64,7 +78,7 @@ func traceRoute(ctx context.Context, target string, maxHops int) ([]Hop, error) 
 		binary.BigEndian.PutUint16(msg[6:8], uint16(base+ttl))
 		copy(msg[8:], "netlight")
 		sent[ttl] = time.Now()
-		if err := unix.Sendto(fds[ttl-1], msg, 0, &sa); err != nil {
+		if err := unix.Sendto(fds[ttl-1], msg, unix.MSG_DONTWAIT, &sa); err != nil {
 			return nil, err
 		}
 	}
@@ -102,7 +116,7 @@ func traceRoute(ctx context.Context, target string, maxHops int) ([]Hop, error) 
 			oob := make([]byte, 128)
 			for ctx.Err() == nil {
 				pfds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN | unix.POLLERR}}
-				if _, err := unix.Poll(pfds, 100); err != nil {
+				if _, err := unix.Poll(pfds, pollTimeout(ctx)); err != nil {
 					if errors.Is(err, unix.EINTR) {
 						continue
 					}

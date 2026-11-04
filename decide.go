@@ -619,20 +619,24 @@ func routeEvidence(f Facts, internetOK bool) []string {
 	return ev
 }
 
-// hopLabel：一站的標註（路由器、單位網路檢查點、抵達）
+// hopLabel：一站的標註（路由器、單位網路檢查點、抵達），可累加以「、」連接
 func hopLabel(f Facts, h Hop) string {
+	var labels []string
 	if h.IP == f.Local.Gateway {
-		return "（路由器）"
+		labels = append(labels, "路由器")
 	}
 	for _, c := range f.Checkpoints {
 		if c.Host == h.IP {
-			return "（" + c.Name + "）"
+			labels = append(labels, c.Name)
 		}
 	}
 	if h.Reached {
-		return "（抵達）"
+		labels = append(labels, "抵達")
 	}
-	return ""
+	if len(labels) == 0 {
+		return ""
+	}
+	return "（" + strings.Join(labels, "、") + "）"
 }
 
 func lightEgress(f Facts, prev Light, internetOK, anyDirect, anyReached, certAny, pubDNSOK, onlyCustom bool, row verdictRow) Light {

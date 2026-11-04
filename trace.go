@@ -34,22 +34,32 @@ func routeProbe(ctx context.Context) RouteResult {
 	return r
 }
 
-// innerEchoSeq：從 Time Exceeded 內附的原始封包（IPv4 標頭＋ICMP 前 8 byte）取出 echo 序號
-func innerEchoSeq(data []byte) (int, bool) {
+// innerEcho：從 Time Exceeded 內附的原始封包（IPv4 標頭＋ICMP 前 8 byte）取出 echo 的 ID 與序號
+func innerEcho(data []byte) (id, seq int, ok bool) {
 	if len(data) < 8 {
-		return 0, false
+		return 0, 0, false
 	}
 	if data[0]>>4 != 4 {
-		return 0, false
+		return 0, 0, false
 	}
-	hl := int(data[0]&0x0f) * 4
+	ihl := int(data[0] & 0x0f)
+	if ihl < 5 { // IHL 至少要 5（20 byte 標頭）
+		return 0, 0, false
+	}
+	hl := ihl * 4
 	if hl+8 > len(data) {
-		return 0, false
+		return 0, 0, false
 	}
 	if data[hl] != 8 { // 內層必須是 echo request
-		return 0, false
+		return 0, 0, false
 	}
-	return int(binary.BigEndian.Uint16(data[hl+6 : hl+8])), true
+	return int(binary.BigEndian.Uint16(data[hl+4 : hl+6])), int(binary.BigEndian.Uint16(data[hl+6 : hl+8])), true
+}
+
+// innerEchoSeq：從 Time Exceeded 內附的原始封包取出 echo 序號
+func innerEchoSeq(data []byte) (int, bool) {
+	_, seq, ok := innerEcho(data)
+	return seq, ok
 }
 
 // sortHops：依 TTL 排序、去除重複 TTL（保留第一個）、截斷到第一個 Reached 為止

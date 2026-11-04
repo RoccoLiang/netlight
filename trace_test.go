@@ -10,37 +10,58 @@ import (
 )
 
 // echoInner：構造 Time Exceeded 內附的原始封包（IPv4 標頭＋ICMP echo 前 8 byte）
-func echoInner(ihl int, typ byte, seq int) []byte {
+func echoInner(ihl int, typ byte, id, seq int) []byte {
 	b := make([]byte, ihl*4+8)
 	b[0] = byte(0x40 | ihl)
 	b[ihl*4] = typ
+	b[ihl*4+4] = byte(id >> 8)
+	b[ihl*4+5] = byte(id)
 	b[ihl*4+6] = byte(seq >> 8)
 	b[ihl*4+7] = byte(seq)
 	return b
 }
 
+func TestInnerEcho(t *testing.T) {
+	if id, seq, ok := innerEcho(echoInner(5, 8, 0x4321, 0x1234)); !ok || id != 0x4321 || seq != 0x1234 {
+		t.Errorf("應取出 id 0x4321、seq 0x1234，得到 %#x, %#x, %v", id, seq, ok)
+	}
+	// IHL 6（24 byte 標頭）也能正確取出
+	if id, _, ok := innerEcho(echoInner(6, 8, 0x4321, 0x1234)); !ok || id != 0x4321 {
+		t.Errorf("IHL 6 應取出 id 0x4321，得到 %#x, %v", id, ok)
+	}
+	// IHL 小於 5（不合法的標頭）
+	if _, _, ok := innerEcho(echoInner(4, 8, 1, 1)); ok {
+		t.Error("IHL 小於 5 應回傳 false")
+	}
+}
+
 func TestInnerEchoSeq(t *testing.T) {
-	if seq, ok := innerEchoSeq(echoInner(5, 8, 0x1234)); !ok || seq != 0x1234 {
+	if seq, ok := innerEchoSeq(echoInner(5, 8, 0x4321, 0x1234)); !ok || seq != 0x1234 {
 		t.Errorf("20 byte 標頭應取出 seq 0x1234，得到 %#x, %v", seq, ok)
 	}
 	// IHL 6（24 byte 標頭）也能正確取出
-	if seq, ok := innerEchoSeq(echoInner(6, 8, 0x1234)); !ok || seq != 0x1234 {
+	if seq, ok := innerEchoSeq(echoInner(6, 8, 0x4321, 0x1234)); !ok || seq != 0x1234 {
 		t.Errorf("IHL 6 應取出 seq 0x1234，得到 %#x, %v", seq, ok)
 	}
 	// 長度不足（只剩標頭，沒有 ICMP 前 8 byte）
-	if _, ok := innerEchoSeq(echoInner(5, 8, 1)[:20]); ok {
+	if _, ok := innerEchoSeq(echoInner(5, 8, 1, 1)[:20]); ok {
 		t.Error("長度不足應回傳 false")
 	}
 	// 版本不是 4
-	bad := echoInner(5, 8, 1)
+	bad := echoInner(5, 8, 1, 1)
 	bad[0] = 0x65 // 版本 6
 	if _, ok := innerEchoSeq(bad); ok {
 		t.Error("版本不是 4 應回傳 false")
 	}
 	// 內層 type 不是 8（echo request）
-	bad = echoInner(5, 0, 1)
+	bad = echoInner(5, 0, 1, 1)
 	if _, ok := innerEchoSeq(bad); ok {
 		t.Error("內層 type 不是 8 應回傳 false")
+	}
+	// IHL 小於 5
+	bad = echoInner(4, 8, 1, 1)
+	if _, ok := innerEchoSeq(bad); ok {
+		t.Error("IHL 小於 5 應回傳 false")
 	}
 }
 

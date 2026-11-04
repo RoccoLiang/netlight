@@ -417,6 +417,26 @@ func TestRouteEvidence(t *testing.T) {
 		}}), false, []string{
 			"路由追蹤（往 1.1.1.1）：1. 192.168.1.1（路由器） → 2. 1.1.1.1（抵達）",
 		}},
+		{"路由器同時是檢查點時標註累加", func() Facts {
+			f := base(RouteResult{Target: "1.1.1.1", Hops: []Hop{
+				{TTL: 1, IP: "192.168.1.1", Ms: 2},
+				{TTL: 2, IP: "1.1.1.1", Ms: 6, Reached: true},
+			}})
+			f.Checkpoints = append(f.Checkpoints, CheckpointResult{Name: "單位交換器", Host: "192.168.1.1", Check: "icmp", OK: true})
+			return f
+		}(), true, []string{
+			"路由追蹤（往 1.1.1.1）：1. 192.168.1.1（路由器、單位交換器） → 2. 1.1.1.1（抵達）",
+		}},
+		{"目的地同時是檢查點時標註累加", func() Facts {
+			f := base(RouteResult{Target: "1.1.1.1", Hops: []Hop{
+				{TTL: 1, IP: "192.168.1.1", Ms: 2},
+				{TTL: 2, IP: "1.1.1.1", Ms: 6, Reached: true},
+			}})
+			f.Checkpoints = append(f.Checkpoints, CheckpointResult{Name: "外點閘道", Host: "1.1.1.1", Check: "icmp", OK: true})
+			return f
+		}(), true, []string{
+			"路由追蹤（往 1.1.1.1）：1. 192.168.1.1（路由器） → 2. 1.1.1.1（外點閘道、抵達）",
+		}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
