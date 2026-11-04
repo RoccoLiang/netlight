@@ -438,7 +438,12 @@ func webSafeReportText(rep Report, osName string, now time.Time) string {
 		rows[i] = l.Name + " " + statusWord[l.Status]
 	}
 	fmt.Fprintf(&b, "燈號：%s\n", strings.Join(rows, "｜"))
-	fmt.Fprintf(&b, "結論：%s\n", safeLabel(rep.Verdict.Text))
+	// 只有 SITE 的結論文字含設定檔填入的網站名稱；其他結論是程式固定文字（可能提到公開的 8.8.8.8），不遮蔽
+	text := rep.Verdict.Text
+	if rep.Verdict.Code == SiteCode {
+		text = safeLabel(text)
+	}
+	fmt.Fprintf(&b, "結論：%s\n", text)
 	fmt.Fprintf(&b, "建議：%s\n", rep.Verdict.Action)
 	if rep.Verdict.Contact != "" {
 		if rep.Verdict.Org != "" {

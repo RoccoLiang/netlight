@@ -783,6 +783,13 @@ func TestWebSafeReportText(t *testing.T) {
 		t.Errorf("安全摘要不得含技術證據前綴：\n%s", text)
 	}
 
+	// 非 SITE 的結論是程式固定文字：其中的公開位址（8.8.8.8）原樣保留，不被遮蔽
+	fixed := Report{Verdict: Verdict{Code: DNSCode, Text: verdicts[dnsManual].Text, Action: verdicts[dnsManual].Action}}
+	ft := webSafeReportText(fixed, "macOS", now)
+	if !strings.Contains(ft, "結論："+verdicts[dnsManual].Text+"\n") || strings.Contains(ft, "已隱藏") {
+		t.Errorf("固定結論文字不應被遮蔽：\n%s", ft)
+	}
+
 	// 代理情境：完整回報含代理位址，安全摘要不得含
 	fp := healthy()
 	fp.Local.Proxy = Proxy{Mode: ProxyExplicit, Addr: "10.0.0.8:3128"}
