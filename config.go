@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -19,6 +20,12 @@ type Target struct {
 	URL  string `json:"url"`
 }
 
+type Checkpoint struct {
+	Name  string `json:"name"`
+	Host  string `json:"host"`
+	Check string `json:"check"` // "ping"、"dns"、"tcp:<port>"
+}
+
 // Config：放在執行檔旁的 netlight.json，用來改成公司窗口與加入內部網站
 type Config struct {
 	Org                   string            `json:"org"`
@@ -26,6 +33,41 @@ type Config struct {
 	Targets               []Target          `json:"targets"`
 	ReplaceDefaultTargets bool              `json:"replace_default_targets"`
 	ShowPublicIP          *bool             `json:"show_public_ip"`
+	Checkpoints           []Checkpoint      `json:"checkpoints"`
+}
+
+// checkpointDNSPort：檢查點 DNS 查詢使用的埠（測試可替換成本機假伺服器）
+var checkpointDNSPort = "53"
+
+// validateCheckpoints：驗證 checkpoints 欄位（第幾個從 1 起算）
+func validateCheckpoints(cps []Checkpoint) error {
+	if len(cps) > 10 {
+		return fmt.Errorf("設定檔 checkpoints 最多 10 個（目前 %d 個）", len(cps))
+	}
+	for i, cp := range cps {
+		n := i + 1
+		if strings.TrimSpace(cp.Name) == "" {
+			return fmt.Errorf("設定檔第 %d 個檢查點的 name 不可為空", n)
+		}
+		if cp.Host == "" || strings.ContainsAny(cp.Host, " /") {
+			return fmt.Errorf("設定檔第 %d 個檢查點的 host 必須是 IP 或主機名稱（不可含空白或斜線）", n)
+		}
+		switch {
+		case cp.Check == "ping":
+			if strings.Contains(cp.Host, ":") {
+				return fmt.Errorf("設定檔第 %d 個檢查點的 check 為 ping 時，host 不可使用 IPv6 位址", n)
+			}
+		case cp.Check == "dns":
+		case strings.HasPrefix(cp.Check, "tcp:"):
+			p, err := strconv.Atoi(strings.TrimPrefix(cp.Check, "tcp:"))
+			if err != nil || p < 1 || p > 65535 {
+				return fmt.Errorf("設定檔第 %d 個檢查點的 check 埠號必須在 1～65535", n)
+			}
+		default:
+			return fmt.Errorf("設定檔第 %d 個檢查點的 check 必須是 ping、dns 或 tcp:<埠>", n)
+		}
+	}
+	return nil
 }
 
 // publicIPEnabled：是否查詢對外 IP（預設 true）
@@ -49,7 +91,7 @@ func (c Config) targets() []Target {
 // validContactKeys：contact 可用的 key（default 與全部結論碼的小寫）
 var validContactKeys = func() map[string]bool {
 	m := map[string]bool{"default": true}
-	for _, c := range []Code{OK, NoLink, NoDHCP, Portal, Clock, VPNBroken, ProxyCode, ProxyPACCode, ISP, RouterOrISP, DNSCode, TLSIntercept, Filtered, SiteCode, Unstable, Unknown} {
+	for _, c := range []Code{OK, NoLink, NoDHCP, Portal, Clock, VPNBroken, ProxyCode, ProxyPACCode, ISP, RouterOrISP, OrgNetwork, DNSCode, TLSIntercept, Filtered, SiteCode, Unstable, Unknown} {
 		m[strings.ToLower(string(c))] = true
 	}
 	return m
@@ -101,6 +143,9 @@ func loadConfig(path string) (Config, error) {
 		if err != nil || u.Scheme != "https" || u.Host == "" {
 			return c, fmt.Errorf("設定檔目標「%s」的網址必須是 https://：%s", t.Name, t.URL)
 		}
+	}
+	if err := validateCheckpoints(c.Checkpoints); err != nil {
+		return c, err
 	}
 	return c, nil
 }

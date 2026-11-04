@@ -108,17 +108,29 @@ type TraceResult struct {
 	Loc  string `json:"loc,omitempty"`
 }
 
+// CheckpointResult：設定檔檢查點的探測結果
+type CheckpointResult struct {
+	Name    string   `json:"name"`
+	Host    string   `json:"host"`
+	Check   string   `json:"check"`
+	OK      bool     `json:"ok"`
+	Unknown bool     `json:"unknown,omitempty"` // 這台電腦無法執行此檢查（例如系統不允許一般權限 ping）
+	Err     ErrClass `json:"error,omitempty"`
+	Ms      int64    `json:"ms"`
+}
+
 type Facts struct {
-	Local      Local         `json:"local"`
-	NoLink     bool          `json:"no_link"`
-	Gateway    GatewayResult `json:"gateway"`
-	Direct     []Probe       `json:"direct"`
-	DNS        []Probe       `json:"dns"`
-	DNSServers []Probe       `json:"dns_servers,omitempty"`
-	PublicDNS  []Probe       `json:"public_dns"`
-	PublicIP   []TraceResult `json:"public_ip,omitempty"`
-	Sites      []Site        `json:"sites"`
-	Captive    Captive       `json:"captive"`
+	Local       Local              `json:"local"`
+	NoLink      bool               `json:"no_link"`
+	Gateway     GatewayResult      `json:"gateway"`
+	Direct      []Probe            `json:"direct"`
+	DNS         []Probe            `json:"dns"`
+	DNSServers  []Probe            `json:"dns_servers,omitempty"`
+	PublicDNS   []Probe            `json:"public_dns"`
+	PublicIP    []TraceResult      `json:"public_ip,omitempty"`
+	Sites       []Site             `json:"sites"`
+	Captive     Captive            `json:"captive"`
+	Checkpoints []CheckpointResult `json:"checkpoints,omitempty"`
 }
 
 // ---- 判斷結果 ----
@@ -151,6 +163,7 @@ const (
 	ProxyPACCode Code = "PROXY_PAC"
 	ISP          Code = "ISP"
 	RouterOrISP  Code = "ROUTER_OR_ISP"
+	OrgNetwork   Code = "ORG_NETWORK"
 	DNSCode      Code = "DNS"
 	TLSIntercept Code = "TLS_INTERCEPT"
 	Filtered     Code = "FILTERED"
@@ -186,8 +199,8 @@ type Verdict struct {
 }
 
 type Report struct {
-	Lights  [5]Light `json:"lights"`
-	Verdict Verdict  `json:"verdict"`
+	Lights  []Light `json:"lights"`
+	Verdict Verdict `json:"verdict"`
 }
 
 // verdictRow：一個結論的全部文字。Egress／Sites 是該結論下「對外連線」黃燈與「網站連線」紅燈的說明，空字串用預設
@@ -204,6 +217,7 @@ const (
 	dnsRouter   Code = "DNS_ROUTER"
 	dnsManual   Code = "DNS_MANUAL"
 	ispHotspot  Code = "ISP_HOTSPOT"
+	ispOrg      Code = "ISP_ORG"
 	noGateway   Code = "NO_GATEWAY"
 )
 
@@ -219,6 +233,7 @@ var verdicts = map[Code]verdictRow{
 	ProxyPACCode: {Text: "這台電腦使用「自動代理設定（PAC）」，直接連線也不通，無法確定是代理還是線路的問題。", Action: "公司電腦請聯絡 IT；家用電腦請在電腦的網路設定中關閉「自動代理設定」再執行一次，仍不通請聯絡網路業者。", Sites: "直接連線也連不上"},
 	ISP:          {Text: "路由器正常，但從路由器出去的線路不通。", Action: "將數據機拔電 30 秒再插回；仍不行請聯絡網路業者（如中華電信）報修。"},
 	RouterOrISP:  {Text: "問題在路由器或電信線路。", Action: "將路由器和數據機拔電 30 秒再插回；仍不行請聯絡網路業者（如中華電信）。"},
+	OrgNetwork:   {Text: "單位設定的網路節點都沒有回應，問題可能在路由器、單位內部網路或出口設備。", Action: "請聯絡單位資訊人員，並提供這個畫面或「複製回報」的內容。"},
 	DNSCode:      {Text: "線路是通的，但「查網址」的服務（DNS）故障。", Action: "重開路由器；仍不行請聯絡網路業者（如中華電信）。"},
 	TLSIntercept: {Text: "加密連線被攔截，常見原因是防毒軟體或公司資安設備。", Action: "暫時關閉防毒軟體的「HTTPS 掃描」再試；公司電腦請聯絡 IT。", Sites: "加密連線被攔截"},
 	Filtered:     {Text: "網路是通的，但網站連線被擋住。", Action: "這個網路可能有過濾或防火牆，請聯絡網路管理者（公司 IT 或場地人員）。"},
@@ -230,6 +245,7 @@ var verdicts = map[Code]verdictRow{
 	dnsRouter:    {As: DNSCode, Text: "路由器負責的查網址功能（DNS）沒有正常回應，可能是路由器或電信業者的 DNS 故障。", Action: "將路由器拔電 30 秒再插回；仍不行請聯絡網路業者（如中華電信）。"},
 	dnsManual:    {As: DNSCode, Text: "這台電腦設定的公共 DNS（例如 8.8.8.8）在這個網路查不到網址。", Action: "如果是自己手動設定的，請到網路設定把 DNS 改回「自動取得」再試；公司電腦請聯絡 IT。"},
 	ispHotspot:   {As: ISP, Text: "手機熱點有連上，但手機本身沒有網路。", Action: "確認手機的行動數據已開啟、有訊號且流量沒有用完；或改用其他網路。"},
+	ispOrg:       {As: ISP, Text: "單位網路節點正常，但從單位往外的線路不通。", Action: "請聯絡單位資訊人員；單位的對外線路通常由資訊人員向電信業者或 GSN 報修。"},
 	noGateway:    {As: NoDHCP, Text: "電腦有位址，但找不到路由器（沒有預設閘道）。", Action: "將路由器拔電 30 秒再插回，等 2 分鐘後再執行一次；如果這台電腦的 IP 是手動設定的，請確認有填寫「路由器」（預設閘道）。"},
 }
 
@@ -341,6 +357,11 @@ func decide(f Facts, cfg Config) Report {
 	skewBad := f.Captive.SkewKnown && f.Captive.Skew.Abs() > 24*time.Hour
 	skewGood := f.Captive.SkewKnown && f.Captive.Skew.Abs() <= time.Hour
 
+	// 單位網路檢查點彙整
+	orgConfigured := len(f.Checkpoints) > 0 && slices.ContainsFunc(f.Checkpoints, func(c CheckpointResult) bool { return !c.Unknown })
+	orgAny := slices.ContainsFunc(f.Checkpoints, func(c CheckpointResult) bool { return c.OK })
+	orgOK := orgConfigured && !slices.ContainsFunc(f.Checkpoints, func(c CheckpointResult) bool { return !c.Unknown && !c.OK })
+
 	// ---- 結論（由上往下，第一個符合者勝出）----
 	var key Code
 	switch {
@@ -360,6 +381,8 @@ func decide(f Facts, cfg Config) Report {
 		key = ProxyPACCode
 	case len(f.Sites) > 0 && f.Local.Proxy.Mode != ProxyNone && !anyReached:
 		key = ProxyCode
+	case orgConfigured && !orgAny && !internetOK:
+		key = OrgNetwork
 	case !internetOK && f.Gateway.Alive:
 		key = ISP
 	case !internetOK:
@@ -391,6 +414,8 @@ func decide(f Facts, cfg Config) Report {
 		key = dnsManual
 	case (key == ISP || key == RouterOrISP) && f.Local.Kind == "手機網路共享":
 		key = ispHotspot
+	case (key == ISP || key == RouterOrISP) && orgAny:
+		key = ispOrg
 	case key == NoDHCP && !f.Local.APIPA:
 		key = noGateway
 	}
@@ -408,13 +433,19 @@ func decide(f Facts, cfg Config) Report {
 		}
 	}
 
-	// ---- 五燈 ----
-	var L [5]Light
-	L[0] = lightLocal(f, hasIP)
-	L[1] = lightGateway(f, L[0], internetOK, noRouter)
-	L[2] = lightEgress(f, L[1], internetOK, anyDirect, anyReached, certAny, pubDNSOK, cfg.ReplaceDefaultTargets, row)
-	L[3] = lightDNS(f, L[2], dnsFail, dnsOK, dnsViaProxy)
-	L[4] = lightSites(f, L[3], anyReached, badSites, row)
+	// ---- 燈號（有設定檢查點時多一盞「單位網路」）----
+	var L []Light
+	l0 := lightLocal(f, hasIP)
+	L = append(L, l0, lightGateway(f, l0, internetOK, noRouter))
+	prev := L[len(L)-1]
+	if len(f.Checkpoints) > 0 {
+		l := lightOrg(f, prev, orgOK)
+		L = append(L, l)
+		prev = l
+	}
+	L = append(L, lightEgress(f, prev, internetOK, anyDirect, anyReached, certAny, pubDNSOK, cfg.ReplaceDefaultTargets, row))
+	L = append(L, lightDNS(f, L[len(L)-1], dnsFail, dnsOK, dnsViaProxy))
+	L = append(L, lightSites(f, L[len(L)-1], anyReached, badSites, row))
 	return Report{Lights: L, Verdict: v}
 }
 
@@ -491,6 +522,41 @@ func lightGateway(f Facts, prev Light, internetOK, noRouter bool) Light {
 		l.Status, l.Summary = Green, gw+" 正常（不回應測試，但網路可用）"
 	default:
 		l.Status, l.Summary = Yellow, gw+" 沒有回應（無法確認）"
+	}
+	return l
+}
+
+// lightOrg：「單位網路」燈，只在設定檔有檢查點時出現
+func lightOrg(f Facts, prev Light, orgOK bool) Light {
+	l := Light{Name: "單位網路"}
+	var names []string
+	ok, n := 0, 0
+	for _, c := range f.Checkpoints {
+		if c.Unknown {
+			l.Evidence = append(l.Evidence, c.Name+"（"+c.Host+"，"+c.Check+"）：無法在這台電腦執行")
+			continue
+		}
+		n++
+		if c.OK {
+			ok++
+			l.Evidence = append(l.Evidence, fmt.Sprintf("%s（%s，%s）：成功 %dms", c.Name, c.Host, c.Check, c.Ms))
+		} else {
+			names = append(names, c.Name)
+			l.Evidence = append(l.Evidence, c.Name+"（"+c.Host+"，"+c.Check+"）："+errText[c.Err])
+		}
+	}
+	switch {
+	case prev.Status == Red || prev.Status == Skip:
+		l.Status, l.Summary = Skip, "前一段異常，未檢查"
+	case n == 0:
+		l.Status, l.Summary = Yellow, "這台電腦無法執行設定的檢查"
+	case ok == n && orgOK:
+		l.Status, l.Summary = Green, fmt.Sprintf("%d 個節點都有回應", n)
+	case ok > 0:
+		l.Status = Yellow
+		l.Summary = fmt.Sprintf("%d/%d 個節點有回應，「%s」沒有回應", ok, n, strings.Join(names, "、"))
+	default:
+		l.Status, l.Summary = Red, "單位網路節點都沒有回應"
 	}
 	return l
 }

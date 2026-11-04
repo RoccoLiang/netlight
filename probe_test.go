@@ -470,3 +470,35 @@ func TestNewClientDialTimeout(t *testing.T) {
 		t.Errorf("應在 2 秒內回錯（撥號逾時），實際 %s", el)
 	}
 }
+
+func TestCheckpointProbeTCP(t *testing.T) {
+	ctx := context.Background()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	if r := checkpointProbe(ctx, Checkpoint{Name: "開著的埠", Host: "127.0.0.1", Check: fmt.Sprintf("tcp:%d", port)}); !r.OK {
+		t.Errorf("開著的埠應 OK：%+v", r)
+	}
+	ln.Close()
+	if r := checkpointProbe(ctx, Checkpoint{Name: "關閉的埠", Host: "127.0.0.1", Check: fmt.Sprintf("tcp:%d", port)}); !r.OK {
+		t.Errorf("關閉的埠收到 RST 也應 OK：%+v", r)
+	}
+}
+
+func TestCheckpointProbeDNS(t *testing.T) {
+	ctx := context.Background()
+	old := checkpointDNSPort
+	_, portStr, _ := net.SplitHostPort(dnsStub(t, dnsmessage.RCodeSuccess))
+	checkpointDNSPort = portStr
+	t.Cleanup(func() { checkpointDNSPort = old })
+	if r := checkpointProbe(ctx, Checkpoint{Name: "單位 DNS", Host: "127.0.0.1", Check: "dns"}); !r.OK {
+		t.Errorf("假 DNS 伺服器有回應應 OK：%+v", r)
+	}
+	// 沒人聽的埠：不是 OK（逾時或被拒絕都可以）
+	checkpointDNSPort = "1"
+	if r := checkpointProbe(ctx, Checkpoint{Name: "單位 DNS", Host: "127.0.0.1", Check: "dns"}); r.OK {
+		t.Errorf("沒有伺服器不應 OK：%+v", r)
+	}
+}

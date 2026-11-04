@@ -158,3 +158,64 @@ func TestPublicIPEnabled(t *testing.T) {
 		t.Errorf("netlight.example.json 應可成功載入：%v", err)
 	}
 }
+
+func TestLoadConfigCheckpoints(t *testing.T) {
+	dir := t.TempDir()
+	write := func(content string) string {
+		p := filepath.Join(dir, "netlight.json")
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	// 合法檢查點：ping、dns、tcp:<埠> 都可載入
+	p := write(`{"checkpoints": [
+		{"name": "單位防火牆", "host": "10.1.0.1", "check": "tcp:443"},
+		{"name": "GSN DNS", "host": "210.69.1.1", "check": "dns"},
+		{"name": "內網主機", "host": "host.corp.example", "check": "ping"}
+	]}`)
+	cfg, err := loadConfig(p)
+	if err != nil {
+		t.Fatalf("合法檢查點應可載入：%v", err)
+	}
+	if len(cfg.Checkpoints) != 3 || cfg.Checkpoints[0].Host != "10.1.0.1" {
+		t.Errorf("檢查點內容不符：%+v", cfg.Checkpoints)
+	}
+
+	bad := []struct {
+		name    string
+		content string
+	}{
+		{"不支援的檢查方式", `{"checkpoints": [{"name": "x", "host": "10.1.0.1", "check": "udp:53"}]}`},
+		{"埠號為 0", `{"checkpoints": [{"name": "x", "host": "10.1.0.1", "check": "tcp:0"}]}`},
+		{"埠號超過 65535", `{"checkpoints": [{"name": "x", "host": "10.1.0.1", "check": "tcp:70000"}]}`},
+		{"name 是空白", `{"checkpoints": [{"name": "  ", "host": "10.1.0.1", "check": "ping"}]}`},
+		{"host 含空白", `{"checkpoints": [{"name": "x", "host": "10.1 0.1", "check": "ping"}]}`},
+		{"超過 10 個", `{"checkpoints": [
+			{"name": "1", "host": "10.1.0.1", "check": "ping"},
+			{"name": "2", "host": "10.1.0.2", "check": "ping"},
+			{"name": "3", "host": "10.1.0.3", "check": "ping"},
+			{"name": "4", "host": "10.1.0.4", "check": "ping"},
+			{"name": "5", "host": "10.1.0.5", "check": "ping"},
+			{"name": "6", "host": "10.1.0.6", "check": "ping"},
+			{"name": "7", "host": "10.1.0.7", "check": "ping"},
+			{"name": "8", "host": "10.1.0.8", "check": "ping"},
+			{"name": "9", "host": "10.1.0.9", "check": "ping"},
+			{"name": "10", "host": "10.1.0.10", "check": "ping"},
+			{"name": "11", "host": "10.1.0.11", "check": "ping"}
+		]}`},
+	}
+	for _, c := range bad {
+		t.Run(c.name, func(t *testing.T) {
+			if _, err := loadConfig(write(c.content)); err == nil {
+				t.Errorf("%s 應回報錯誤", c.name)
+			}
+		})
+	}
+
+	// org_network 可作為 contact key
+	p = write(`{"contact": {"org_network": "單位資訊室 分機 2211"}}`)
+	if _, err := loadConfig(p); err != nil {
+		t.Errorf("org_network 應可作為 contact key：%v", err)
+	}
+}

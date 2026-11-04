@@ -8,6 +8,9 @@
   "targets": [
     { "name": "公司 ERP", "url": "https://erp.example.com" }
   ],
+  "checkpoints": [
+    { "name": "單位防火牆", "host": "10.1.0.1", "check": "tcp:443" }
+  ],
   "replace_default_targets": false,
   "show_public_ip": true
 }

@@ -31,13 +31,14 @@ const (
 
 // runWithEvents 各組探測完成時 emit 的 stage 字串
 const (
-	stageDirect    = "direct"
-	stagePublicDNS = "public_dns"
-	stageDNS       = "dns"
-	stageLocal     = "local"
-	stageGateway   = "gateway"
-	stageSites     = "sites"
-	stageCaptive   = "captive"
+	stageDirect      = "direct"
+	stagePublicDNS   = "public_dns"
+	stageDNS         = "dns"
+	stageCheckpoints = "checkpoints"
+	stageLocal       = "local"
+	stageGateway     = "gateway"
+	stageSites       = "sites"
+	stageCaptive     = "captive"
 )
 
 // 撥號逾時：自建 Transport 的 DialContext 上限，避免撥號在背景無限等待
@@ -429,6 +430,62 @@ func gatewayProbe(ctx context.Context, gw string) GatewayResult {
 	return GatewayResult{Note: note}
 }
 
+// checkpointProbe：探測設定檔的單位網路檢查點，逾時 2 秒
+func checkpointProbe(ctx context.Context, cp Checkpoint) CheckpointResult {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	r := CheckpointResult{Name: cp.Name, Host: cp.Host, Check: cp.Check}
+	start := time.Now()
+	switch {
+	case cp.Check == "ping":
+		host := cp.Host
+		if net.ParseIP(host) == nil {
+			addrs, err := net.DefaultResolver.LookupHost(ctx, host)
+			if err != nil {
+				r.Err, r.Ms = classify(err), time.Since(start).Milliseconds()
+				return r
+			}
+			ipv4 := ""
+			for _, a := range addrs {
+				if ip := net.ParseIP(a); ip != nil && ip.To4() != nil {
+					ipv4 = a
+					break
+				}
+			}
+			if ipv4 == "" {
+				r.Err, r.Ms = ErrDNS, time.Since(start).Milliseconds()
+				return r
+			}
+			host = ipv4
+		}
+		err := icmpPing(ctx, host)
+		r.Ms = time.Since(start).Milliseconds()
+		if err == nil {
+			r.OK = true
+			return r
+		}
+		if errors.Is(err, errICMPUnavailable) {
+			r.Unknown = true
+			return r
+		}
+		r.Err = classify(err)
+		return r
+	case cp.Check == "dns":
+		p := publicDNSProbe(ctx, net.JoinHostPort(cp.Host, checkpointDNSPort), "www.google.com", 2*time.Second)
+		r.OK, r.Err, r.Ms = p.OK, p.Err, p.Ms
+		return r
+	default: // tcp:<port>
+		p := tcpProbe(ctx, net.JoinHostPort(cp.Host, strings.TrimPrefix(cp.Check, "tcp:")), 2*time.Second)
+		r.Ms = p.Ms
+		if p.OK || p.Err == ErrRefused { // 收到 RST 代表對方活著
+			r.OK = true
+			return r
+		}
+		r.Err = p.Err
+		return r
+	}
+}
+
 // arpProbeFn：測試可替換的 ARP 探測
 var arpProbeFn = arpProbe
 
@@ -558,6 +615,10 @@ func runWithEvents(ctx context.Context, cfg Config, emit func(stage string)) Fac
 	direct := make([]Probe, len(directTargets))
 	publicDNSRes := make([]Probe, len(publicDNS))
 	dnsRes := make([]Probe, len(hosts))
+	var cpRes []CheckpointResult
+	if len(cfg.Checkpoints) > 0 {
+		cpRes = make([]CheckpointResult, len(cfg.Checkpoints))
+	}
 	// group：跑一組探測，組內全部完成時 emit
 	group := func(stage string, run func()) *sync.WaitGroup {
 		g := &sync.WaitGroup{}
@@ -591,7 +652,21 @@ func runWithEvents(ctx context.Context, cfg Config, emit func(stage string)) Fac
 		}
 		wg.Wait()
 	})
-	for _, g := range []*sync.WaitGroup{gDirect, gPublicDNS, gDNS} {
+	var gCheckpoints *sync.WaitGroup
+	if len(cfg.Checkpoints) > 0 {
+		gCheckpoints = group(stageCheckpoints, func() {
+			var wg sync.WaitGroup
+			for i, cp := range cfg.Checkpoints {
+				wg.Go(func() { cpRes[i] = checkpointProbe(ctx, cp) })
+			}
+			wg.Wait()
+		})
+	}
+	earlys := []*sync.WaitGroup{gDirect, gPublicDNS, gDNS}
+	if gCheckpoints != nil {
+		earlys = append(earlys, gCheckpoints)
+	}
+	for _, g := range earlys {
 		early.Add(1)
 		go func() {
 			g.Wait()
@@ -608,6 +683,7 @@ func runWithEvents(ctx context.Context, cfg Config, emit func(stage string)) Fac
 		return f
 	}
 	f.Direct, f.PublicDNS, f.DNS = direct, publicDNSRes, dnsRes
+	f.Checkpoints = cpRes
 	f.Sites = make([]Site, len(targets))
 
 	// 每個 goroutine 只寫自己的欄位或切片元素，不需要鎖

@@ -513,6 +513,107 @@ func TestDecideScenarios(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "單位節點全掛、出不去",
+			id:   "T14",
+			mod: func(f *Facts) {
+				f.Checkpoints = []CheckpointResult{
+					{Name: "單位防火牆", Host: "10.1.0.1", Check: "tcp:443", Err: ErrTimeout},
+					{Name: "GSN DNS", Host: "210.69.1.1", Check: "dns", Err: ErrTimeout},
+				}
+				f.Direct = failAll(f.Direct, ErrTimeout)
+				f.PublicDNS = failAll(f.PublicDNS, ErrTimeout)
+				f.DNS = failAll(f.DNS, ErrTimeout)
+				f.Sites = failSites(f.Sites, ErrTimeout)
+			},
+			code: OrgNetwork,
+			check: func(t *testing.T, r Report) {
+				if len(r.Lights) != 6 {
+					t.Fatalf("燈數 = %d，預期 6", len(r.Lights))
+				}
+				if r.Lights[2].Name != "單位網路" || r.Lights[2].Status != Red {
+					t.Errorf("燈 3 = %s（%v），預期單位網路紅燈", r.Lights[2].Name, r.Lights[2].Status)
+				}
+				if r.Lights[3].Status != Skip {
+					t.Errorf("燈 4 = %v，預期略過", r.Lights[3].Status)
+				}
+			},
+		},
+		{
+			name: "單位節點正常、往外不通",
+			id:   "T14",
+			mod: func(f *Facts) {
+				f.Checkpoints = []CheckpointResult{
+					{Name: "單位防火牆", Host: "10.1.0.1", Check: "tcp:443", OK: true, Ms: 12},
+					{Name: "GSN DNS", Host: "210.69.1.1", Check: "dns", OK: true, Ms: 20},
+				}
+				f.Direct = failAll(f.Direct, ErrTimeout)
+				f.PublicDNS = failAll(f.PublicDNS, ErrTimeout)
+				f.DNS = failAll(f.DNS, ErrTimeout)
+				f.Sites = failSites(f.Sites, ErrTimeout)
+			},
+			code: ISP,
+			check: func(t *testing.T, r Report) {
+				if !strings.Contains(r.Verdict.Text, "單位網路節點正常") {
+					t.Errorf("結論文字應含「單位網路節點正常」：%q", r.Verdict.Text)
+				}
+			},
+		},
+		{
+			name: "部分節點沒回應、網路正常",
+			id:   "T14",
+			mod: func(f *Facts) {
+				f.Checkpoints = []CheckpointResult{
+					{Name: "單位防火牆", Host: "10.1.0.1", Check: "tcp:443", OK: true, Ms: 8},
+					{Name: "GSN DNS", Host: "210.69.1.1", Check: "dns", Err: ErrTimeout},
+				}
+			},
+			code: OK,
+			check: func(t *testing.T, r Report) {
+				if r.Lights[2].Status != Yellow {
+					t.Errorf("單位網路燈 = %v，預期黃燈", r.Lights[2].Status)
+				}
+				if !strings.Contains(r.Lights[2].Summary, "GSN DNS") {
+					t.Errorf("摘要應含失敗節點名稱：%q", r.Lights[2].Summary)
+				}
+			},
+		},
+		{
+			name: "ping 無法執行",
+			id:   "T14",
+			mod: func(f *Facts) {
+				f.Checkpoints = []CheckpointResult{
+					{Name: "內網主機 A", Host: "10.1.0.2", Check: "ping", Unknown: true},
+					{Name: "內網主機 B", Host: "10.1.0.3", Check: "ping", Unknown: true},
+				}
+				f.Direct = failAll(f.Direct, ErrTimeout)
+				f.PublicDNS = failAll(f.PublicDNS, ErrTimeout)
+				f.DNS = failAll(f.DNS, ErrTimeout)
+				f.Sites = failSites(f.Sites, ErrTimeout)
+			},
+			code: ISP,
+			check: func(t *testing.T, r Report) {
+				if r.Lights[2].Status != Yellow {
+					t.Errorf("單位網路燈 = %v，預期黃燈", r.Lights[2].Status)
+				}
+			},
+		},
+		{
+			name: "沒有設定檢查點",
+			id:   "T14",
+			mod:  func(f *Facts) {},
+			code: OK,
+			check: func(t *testing.T, r Report) {
+				if len(r.Lights) != 5 {
+					t.Fatalf("燈數 = %d，預期 5", len(r.Lights))
+				}
+				for i, want := range []string{"本機網路", "路由器", "對外連線", "網址查詢", "網站連線"} {
+					if r.Lights[i].Name != want {
+						t.Errorf("燈 %d 名稱 = %s，預期 %s", i+1, r.Lights[i].Name, want)
+					}
+				}
+			},
+		},
 	}
 
 	for _, c := range cases {

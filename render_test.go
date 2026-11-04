@@ -120,6 +120,30 @@ func screens() map[string]func() (Facts, Config) {
 			f.DNS = nil
 			return f, Config{}
 		},
+		"o_org_down": func() (Facts, Config) {
+			f := healthy()
+			f.Checkpoints = []CheckpointResult{
+				{Name: "單位防火牆", Host: "10.1.0.1", Check: "tcp:443", Err: ErrTimeout, Ms: 2000},
+				{Name: "GSN DNS", Host: "210.69.1.1", Check: "dns", Err: ErrTimeout, Ms: 2000},
+			}
+			f.Direct = failAll(f.Direct, ErrTimeout)
+			f.PublicDNS = failAll(f.PublicDNS, ErrTimeout)
+			f.DNS = failAll(f.DNS, ErrTimeout)
+			f.Sites = failSites(f.Sites, ErrTimeout)
+			return f, Config{}
+		},
+		"o_org_upstream": func() (Facts, Config) {
+			f := healthy()
+			f.Checkpoints = []CheckpointResult{
+				{Name: "單位防火牆", Host: "10.1.0.1", Check: "tcp:443", OK: true, Ms: 12},
+				{Name: "GSN DNS", Host: "210.69.1.1", Check: "dns", OK: true, Ms: 20},
+			}
+			f.Direct = failAll(f.Direct, ErrTimeout)
+			f.PublicDNS = failAll(f.PublicDNS, ErrTimeout)
+			f.DNS = failAll(f.DNS, ErrTimeout)
+			f.Sites = failSites(f.Sites, ErrTimeout)
+			return f, Config{}
+		},
 	}
 }
 
@@ -147,6 +171,7 @@ func TestRenderGolden(t *testing.T) {
 		"d_portal": Portal, "e_site_company": SiteCode, "f_nodhcp": NoDHCP, "g_clock": Clock,
 		"h_vpn": VPNBroken, "i_proxy": ProxyCode, "i_proxypac": ProxyPACCode, "j_isp": ISP,
 		"k_tls": TLSIntercept, "l_filtered": Filtered, "m_unstable": Unstable, "n_unknown": Unknown,
+		"o_org_down": OrgNetwork, "o_org_upstream": ISP,
 	}
 	for name, mk := range screens() {
 		f, cfg := mk()

@@ -53,7 +53,7 @@ func TestDecide(t *testing.T) {
 		name   string
 		mod    func(f *Facts)
 		code   Code
-		lights [5]Status // 本機、路由器、對外、網址、網站
+		lights [5]Status // 本機、路由器、對外、網址、網站（沒有檢查點時共 5 盞）
 	}{
 		{"全部正常", func(f *Facts) {}, OK, [5]Status{Green, Green, Green, Green, Green}},
 
@@ -333,7 +333,7 @@ func TestDecidePACWording(t *testing.T) {
 func TestExitCode(t *testing.T) {
 	for code, want := range map[Code]int{
 		OK: 0, NoLink: 1, NoDHCP: 1, Portal: 1, Clock: 1, VPNBroken: 1, ProxyCode: 1,
-		ISP: 1, RouterOrISP: 1, DNSCode: 1, TLSIntercept: 1, Filtered: 1, SiteCode: 1,
+		ISP: 1, RouterOrISP: 1, OrgNetwork: 1, DNSCode: 1, TLSIntercept: 1, Filtered: 1, SiteCode: 1,
 		Unstable: 1, Unknown: 2, ProxyPACCode: 2,
 	} {
 		if got := code.ExitCode(); got != want {
